@@ -14,6 +14,7 @@ Before running commands, verify:
 - [x] `guardkit init nats-asyncio-service` completed
 - [x] Spec merged (no addendum files — Feature 7 fleet compose already in main spec)
 - [x] ADRs in place (2 decision records in `docs/design/decisions/`)
+- [x] Graphiti knowledge graph seeded (project overview, ADRs, feature review)
 - [ ] Docker available on GB10 (`docker info`)
 - [ ] NATS CLI installed or installable (`brew install nats-io/nats-tools/nats`)
 
@@ -37,7 +38,11 @@ We skip `/system-arch` and `/system-design` because:
 
 These features produce the running NATS server that everything else depends on.
 
-### Feature 1 — NATS Server Configuration
+### Feature 1 — NATS Server Configuration ✅ PLANNED
+
+**Status:** Feature plan complete. 4 tasks created, ready for implementation.
+**Feature ID:** FEAT-D2AD
+**Review:** TASK-REV-69BD (completed, score 85/100)
 
 ```bash
 /feature-plan "NATS Server Configuration: nats-server.conf with JetStream enabled for DGX Spark GB10" \
@@ -46,7 +51,26 @@ These features produce the running NATS server that everything else depends on.
 
 Covers: `config/nats-server.conf` — JetStream enabled, 1GB memory / 10GB file limits,
 Tailscale-accessible on all interfaces, monitoring on port 8222, logging config.
-Tasks: TASK-1 through TASK-4.
+
+**Key Decision:** Option 1 selected — single nats-server.conf with include accounts +
+`envsubst` for credential management. NATS config does not natively support env var
+interpolation, so `scripts/docker-entrypoint.sh` runs `envsubst` before launching
+`nats-server`. Rejected: nsc Operator Model (overkill for single server, complexity 7/10),
+auth tokens only (violates ADR-002).
+
+**Tasks:**
+
+| Wave | Task | Title | Complexity | Mode |
+|------|------|-------|-----------|------|
+| 1 | TASK-NATS-001 | Create nats-server.conf with JetStream | 3 | task-work |
+| 2 | TASK-NATS-002 | Create account configs + envsubst entrypoint | 4 | task-work |
+| 3 | TASK-NATS-003 | Create .env.example | 2 | direct |
+| 4 | TASK-NATS-004 | Verify NATS startup + JetStream | 3 | task-work |
+
+**Files:** `tasks/backlog/nats-server-config/` (4 task files + IMPLEMENTATION-GUIDE.md + README.md)
+**AutoBuild:** `.guardkit/features/FEAT-D2AD.yaml`
+
+**Next:** `/task-work TASK-NATS-001` or `/feature-build FEAT-D2AD`
 
 ### Feature 2 — Account-Based Multi-Tenancy
 
@@ -177,15 +201,15 @@ nats-infrastructure/
 │   ├── docker-compose.fleet.yml          ← Feature 7 (agent fleet)
 │   └── docker-compose.adapters.yml       ← Feature 7 (adapters)
 ├── config/
-│   ├── nats-server.conf                  ← Feature 1
-│   ├── accounts/
-│   │   ├── appmilla.conf                 ← Feature 2
-│   │   └── finproxy.conf                 ← Feature 2
-│   └── jetstream.conf                    ← Feature 1
+│   ├── nats-server.conf                  ← Feature 1 (TASK-NATS-001)
+│   └── accounts/
+│       └── accounts.conf.template        ← Feature 1 (TASK-NATS-002, envsubst template)
 ├── streams/
 │   ├── provision-streams.sh              ← Features 3 + 6
 │   └── stream-definitions.json           ← Feature 3
 ├── scripts/
+│   ├── docker-entrypoint.sh              ← Feature 1 (TASK-NATS-002, envsubst + exec nats-server)
+│   ├── verify-nats.sh                    ← Feature 1 (TASK-NATS-004, startup verification)
 │   ├── setup-gb10.sh                     ← Feature 5
 │   ├── health-check.sh                   ← Feature 5
 │   ├── backup-jetstream.sh               ← Feature 5
@@ -199,6 +223,28 @@ nats-infrastructure/
 │       └── decisions/ADR-001..002
 └── README.md
 ```
+
+---
+
+## Graphiti Knowledge Graph
+
+**Config:** `.guardkit/graphiti.yaml` — LLM on GB10 vLLM (`neuralmagic/Qwen2.5-14B-Instruct-FP8-dynamic`),
+embeddings on GB10 vLLM (`nomic-embed-text-v1.5`), FalkorDB on Synology NAS (`whitestocks:6379`).
+
+**Note:** Config was temporarily pointed at MacBook Ollama while the agentic dataset factory
+used the GB10 GPU for GCSE study tutor training data generation. Switched back to GB10 vLLM
+on 2026-04-07.
+
+**Seeded episodes (2026-04-07):**
+
+| Episode | Type | Nodes | Edges |
+|---------|------|-------|-------|
+| Project overview | project_overview | 19 | 24 |
+| FEAT-D2AD review findings | full_doc | 10 | 8 |
+| ADR-001 (standalone infra repo) | adr | 6 | 6 |
+| ADR-002 (account multi-tenancy) | adr | 6 | 3 |
+
+**CLI usage:** `OPENAI_API_KEY="not-needed-for-vllm" guardkit graphiti add-context <path> --type <type> --timeout 300`
 
 ---
 
