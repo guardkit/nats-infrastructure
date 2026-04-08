@@ -1,15 +1,15 @@
 ---
-id: TASK-NATS-002
-title: "Create account configuration files with envsubst templates"
-status: pending
-task_type: scaffolding
-parent_review: TASK-REV-69BD
-feature_id: FEAT-NATS-CFG
-wave: 2
-implementation_mode: task-work
 complexity: 4
 dependencies:
-  - TASK-NATS-001
+- TASK-NATS-001
+feature_id: FEAT-NATS-CFG
+id: TASK-NATS-002
+implementation_mode: task-work
+parent_review: TASK-REV-69BD
+status: design_approved
+task_type: scaffolding
+title: Create account configuration files with envsubst templates
+wave: 2
 ---
 
 # Create Account Configuration Files with envsubst Templates

@@ -1,0 +1,14 @@
+{
+  "task_id": "TASK-NATS-001",
+  "checkpoints": [
+    {
+      "turn": 1,
+      "commit_hash": "2ed259ca239f584d92745835f829752fab1841cd",
+      "timestamp": "2026-04-08T09:44:19.365155",
+      "tests_passed": true,
+      "test_count": 0,
+      "message": "[guardkit-checkpoint] Turn 1 complete (tests: pass)"
+    }
+  ],
+  "last_updated": "2026-04-08T09:44:19.365429"
+}

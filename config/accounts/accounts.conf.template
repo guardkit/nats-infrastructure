@@ -1,0 +1,88 @@
+# =============================================================================
+# NATS Account Configuration — Multi-Tenancy (ADR-002)
+# =============================================================================
+# Defines accounts, users, and permissions for the ships-computer NATS server.
+# Passwords use ${VAR} envsubst syntax — substituted at container startup by
+# scripts/docker-entrypoint.sh. Never commit real passwords to this file.
+#
+# Accounts:
+#   APPMILLA — Rich + James (Appmilla principals, full access)
+#   FINPROXY — Mark (client collaborator, scoped to finproxy.> topics)
+#   SYS      — Admin (NATS system/administrative account)
+
+# ---------------------------------------------------------------------------
+# Top-level system account designation
+# ---------------------------------------------------------------------------
+# The SYS account is used for NATS internal administration and monitoring.
+# This directive must be at the top level (outside the accounts block).
+system_account: SYS
+
+# ---------------------------------------------------------------------------
+# Account definitions
+# ---------------------------------------------------------------------------
+accounts {
+
+    # -----------------------------------------------------------------------
+    # APPMILLA — internal Appmilla account (full access)
+    # -----------------------------------------------------------------------
+    # Rich and James have full publish/subscribe access to all subjects.
+    # JetStream is enabled for persistent messaging (streams, consumers).
+    APPMILLA {
+        jetstream {
+            enabled
+        }
+        users: [
+            {
+                user: "rich"
+                password: "${RICH_NATS_PASSWORD}"
+                permissions: {
+                    publish: ">"
+                    subscribe: ">"
+                }
+            }
+            {
+                user: "james"
+                password: "${JAMES_NATS_PASSWORD}"
+                permissions: {
+                    publish: ">"
+                    subscribe: ">"
+                }
+            }
+        ]
+    }
+
+    # -----------------------------------------------------------------------
+    # FINPROXY — client collaborator account (scoped access)
+    # -----------------------------------------------------------------------
+    # Mark has publish/subscribe access scoped to finproxy.> topics only.
+    # JetStream is enabled for FinProxy project streams.
+    FINPROXY {
+        jetstream {
+            enabled
+        }
+        users: [
+            {
+                user: "mark"
+                password: "${MARK_NATS_PASSWORD}"
+                permissions: {
+                    publish: "finproxy.>"
+                    subscribe: "finproxy.>"
+                }
+            }
+        ]
+    }
+
+    # -----------------------------------------------------------------------
+    # SYS — NATS system/administration account
+    # -----------------------------------------------------------------------
+    # Used for NATS server administration and internal system events.
+    # Designated as system_account above.
+    SYS {
+        users: [
+            {
+                user: "admin"
+                password: "${ADMIN_NATS_PASSWORD}"
+            }
+        ]
+    }
+}
