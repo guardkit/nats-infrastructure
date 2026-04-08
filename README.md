@@ -11,7 +11,11 @@ This is config/ops — use `/feature-plan` for task breakdown, then work through
 ## Quick Start (GB10)
 
 ```bash
-# One-shot setup
+# 1. Copy .env.example and set real passwords
+cp .env.example .env
+# Edit .env with your actual passwords (all 4 are required)
+
+# 2. One-shot setup
 ./scripts/setup-gb10.sh
 
 # Or manually
@@ -19,6 +23,8 @@ docker compose up -d
 ./streams/provision-streams.sh
 ./scripts/health-check.sh
 ```
+
+See [`.env.example`](.env.example) for all required environment variables and their descriptions.
 
 ## What's In The Box
 
