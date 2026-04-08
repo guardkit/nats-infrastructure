@@ -1,17 +1,17 @@
 ---
-id: TASK-NATS-004
-title: "Create verification script for NATS startup and JetStream"
-status: pending
-task_type: testing
-parent_review: TASK-REV-69BD
-feature_id: FEAT-NATS-CFG
-wave: 4
-implementation_mode: task-work
 complexity: 3
 dependencies:
-  - TASK-NATS-001
-  - TASK-NATS-002
-  - TASK-NATS-003
+- TASK-NATS-001
+- TASK-NATS-002
+- TASK-NATS-003
+feature_id: FEAT-NATS-CFG
+id: TASK-NATS-004
+implementation_mode: task-work
+parent_review: TASK-REV-69BD
+status: design_approved
+task_type: testing
+title: Create verification script for NATS startup and JetStream
+wave: 4
 ---
 
 # Create Verification Script for NATS Startup and JetStream

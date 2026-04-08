@@ -1,0 +1,118 @@
+{
+  "task_id": "TASK-NATS-004",
+  "timestamp": "2026-04-08T10:04:52.398152",
+  "completed": true,
+  "phases": {
+    "phase_3": {
+      "detected": true,
+      "text": "Implementation (TDD Mode)**",
+      "completed": false
+    }
+  },
+  "quality_gates": {
+    "tests_passing": true,
+    "tests_passed": 113,
+    "tests_failed": 0,
+    "coverage": 99.0,
+    "coverage_met": true,
+    "all_passed": true
+  },
+  "files_modified": [
+    "/Users/richardwoollcott/Projects/appmilla_github/nats-infrastructure/.guardkit/worktrees/FEAT-D2AD/tests/test_verify_nats_script.py",
+    "tasks/backlog/TASK-NATS-004-verify-nats-startup.md"
+  ],
+  "files_created": [
+    ".claude/task-plans/TASK-NATS-004-implementation-plan.md",
+    ".guardkit/autobuild/TASK-NATS-003/checkpoints.json",
+    ".guardkit/autobuild/TASK-NATS-004/player_turn_1.json",
+    ".guardkit/autobuild/TASK-NATS-004/task_work_results.json",
+    ".guardkit/autobuild/TASK-NATS-004/turn_context.json",
+    "/Users/richardwoollcott/Projects/appmilla_github/nats-infrastructure/.guardkit/worktrees/FEAT-D2AD/.guardkit/autobuild/TASK-NATS-004/player_turn_1.json",
+    "/Users/richardwoollcott/Projects/appmilla_github/nats-infrastructure/.guardkit/worktrees/FEAT-D2AD/scripts/verify-nats.sh",
+    "/Users/richardwoollcott/Projects/appmilla_github/nats-infrastructure/.guardkit/worktrees/FEAT-D2AD/tests/test_verify_nats_script.py",
+    "scripts/verify-nats.sh",
+    "tasks/design_approved/TASK-NATS-004-verify-nats-startup.md",
+    "tests/test_verify_nats_script.py"
+  ],
+  "tests_written": [
+    "/Users/richardwoollcott/Projects/appmilla_github/nats-infrastructure/.guardkit/worktrees/FEAT-D2AD/tests/test_verify_nats_script.py"
+  ],
+  "summary": "113 tests passed, 99.0% coverage, all quality gates passed",
+  "sdk_turns": {
+    "turns_used": 38,
+    "max_turns": 100,
+    "ceiling_hit": false
+  },
+  "completion_promises": [
+    {
+      "criterion_id": "AC-001",
+      "criterion_text": "scripts/verify-nats.sh exists and is executable",
+      "status": "complete",
+      "evidence": "Created scripts/verify-nats.sh with #!/bin/sh shebang and chmod +x. Tests test_script_file_exists, test_script_is_executable, test_script_has_shebang, and test_script_is_not_empty all pass.",
+      "test_file": "tests/test_verify_nats_script.py",
+      "implementation_files": [
+        "scripts/verify-nats.sh"
+      ]
+    },
+    {
+      "criterion_id": "AC-002",
+      "criterion_text": "Script checks NATS server is healthy via port 8222 healthcheck",
+      "status": "complete",
+      "evidence": "Script checks http://localhost:8222/healthz via curl -sS with --max-time timeout. Default NATS_MONITOR_URL is http://localhost:8222. Verifies HTTP 200 response code. Tests test_checks_healthz_endpoint and test_uses_curl_for_healthcheck pass.",
+      "test_file": "tests/test_verify_nats_script.py",
+      "implementation_files": [
+        "scripts/verify-nats.sh"
+      ]
+    },
+    {
+      "criterion_id": "AC-003",
+      "criterion_text": "Script verifies JetStream is enabled via /jsz endpoint",
+      "status": "complete",
+      "evidence": "Script curls /jsz endpoint and validates JetStream info by checking for memory/storage/config fields in the JSON response using jq (or grep fallback). Tests test_checks_jsz_endpoint, test_uses_curl_for_jetstream, and test_validates_jetstream_info all pass.",
+      "test_file": "tests/test_verify_nats_script.py",
+      "implementation_files": [
+        "scripts/verify-nats.sh"
+      ]
+    },
+    {
+      "criterion_id": "AC-004",
+      "criterion_text": "Script verifies server_name is 'ships-computer' via /varz endpoint",
+      "status": "complete",
+      "evidence": "Script curls /varz endpoint, extracts server_name field via jq or grep fallback, and compares against 'ships-computer'. Also extracts and reports the server version. Tests test_checks_varz_endpoint, test_uses_curl_for_server_info, test_checks_server_name_ships_computer, and test_checks_server_name_field all pass.",
+      "test_file": "tests/test_verify_nats_script.py",
+      "implementation_files": [
+        "scripts/verify-nats.sh"
+      ]
+    },
+    {
+      "criterion_id": "AC-005",
+      "criterion_text": "Script reports clear PASS/FAIL for each check",
+      "status": "complete",
+      "evidence": "Script uses pass_check() and fail_check() helper functions that output [PASS] and [FAIL] prefixed messages via echo. Each of the 4+ checks uses these functions. Tests test_reports_pass, test_reports_fail, test_pass_and_fail_used_in_output, and test_reports_multiple_checks (verifying at least 3 PASS and 3 FAIL output paths) all pass.",
+      "test_file": "tests/test_verify_nats_script.py",
+      "implementation_files": [
+        "scripts/verify-nats.sh"
+      ]
+    },
+    {
+      "criterion_id": "AC-006",
+      "criterion_text": "Script exits with non-zero code if any check fails",
+      "status": "complete",
+      "evidence": "Script tracks exit_code variable (initialized to 0, set to 1 by fail_check). Final line is 'exit $exit_code'. Also has early 'exit 1' for startup timeout. Tests test_has_exit_with_non_zero, test_tracks_failure_state, and test_has_exit_zero_on_success all pass.",
+      "test_file": "tests/test_verify_nats_script.py",
+      "implementation_files": [
+        "scripts/verify-nats.sh"
+      ]
+    },
+    {
+      "criterion_id": "AC-007",
+      "criterion_text": "Script works both locally and in CI (uses curl, not nats CLI dependency)",
+      "status": "complete",
+      "evidence": "All core checks (health, JetStream, server info) use curl. The nats CLI is only used for optional account auth checks, gated behind 'command -v nats' with clear [SKIP] message when unavailable. Tests test_uses_curl_command, test_does_not_require_nats_cli (verifies >= 3 curl uses), and test_optional_nats_cli_for_auth all pass.",
+      "test_file": "tests/test_verify_nats_script.py",
+      "implementation_files": [
+        "scripts/verify-nats.sh"
+      ]
+    }
+  ]
+}
