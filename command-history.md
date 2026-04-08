@@ -83,3 +83,5 @@ curl-based verification (no nats CLI dependency)
 
 /task-work TASK-NATS-001          # Start implementation
 /feature-build FEAT-D2AD          # Or run autonomous build
+
+GUARDKIT_LOG_LEVEL=DEBUG guardkit autobuild feature FEAT-D2AD --verbose --max-turns 30
