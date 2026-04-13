@@ -1,0 +1,14 @@
+{
+  "task_id": "TASK-DCD-001",
+  "checkpoints": [
+    {
+      "turn": 1,
+      "commit_hash": "d6d37c95dac6500fc993ea3659a5c9b9b192cfe1",
+      "timestamp": "2026-04-13T20:26:50.952931",
+      "tests_passed": true,
+      "test_count": 0,
+      "message": "[guardkit-checkpoint] Turn 1 complete (tests: pass)"
+    }
+  ],
+  "last_updated": "2026-04-13T20:26:50.953166"
+}

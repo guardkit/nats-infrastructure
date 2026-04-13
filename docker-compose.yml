@@ -10,6 +10,12 @@
 #
 # See config/nats-server.conf for server settings and
 # config/accounts/accounts.conf.template for account definitions.
+#
+# ⚠️  WARNING — DATA LOSS:
+#   `docker compose down -v` removes the nats-data volume and DESTROYS ALL
+#   JetStream data (streams, messages, consumers, KV buckets). Use plain
+#   `docker compose down` to stop containers while preserving persistent data.
+#   Only use `-v` / `--volumes` when you intentionally want a clean slate.
 # =============================================================================
 
 services:
@@ -43,6 +49,8 @@ services:
     networks:
       - ships-computer
 
+# Named volumes persist across `docker compose down` but are DESTROYED by
+# `docker compose down -v`. See warning at top of file.
 volumes:
   nats-data:
 
