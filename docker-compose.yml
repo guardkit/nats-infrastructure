@@ -1,0 +1,58 @@
+# =============================================================================
+# Docker Compose — NATS Server (ships-computer)
+# =============================================================================
+# Builds custom NATS image with envsubst support for password injection,
+# mounts config read-only, and persists JetStream data to a named volume.
+#
+# Usage:
+#   cp .env.example .env   # Set real passwords
+#   docker compose up -d
+#
+# See config/nats-server.conf for server settings and
+# config/accounts/accounts.conf.template for account definitions.
+#
+# ⚠️  WARNING — DATA LOSS:
+#   `docker compose down -v` removes the nats-data volume and DESTROYS ALL
+#   JetStream data (streams, messages, consumers, KV buckets). Use plain
+#   `docker compose down` to stop containers while preserving persistent data.
+#   Only use `-v` / `--volumes` when you intentionally want a clean slate.
+# =============================================================================
+
+services:
+  nats:
+    build: .
+    container_name: ships-computer-nats
+    restart: unless-stopped
+    env_file: .env
+
+    ports:
+      - "4222:4222"   # Client connections
+      - "8222:8222"   # HTTP monitoring
+
+    volumes:
+      # JetStream persistent storage
+      - nats-data:/data/jetstream
+
+      # Server config (read-only)
+      - ./config/nats-server.conf:/etc/nats/nats-server.conf:ro
+
+      # Account templates for envsubst processing (read-only)
+      - ./config/accounts:/etc/nats/config/accounts:ro
+
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8222/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+    networks:
+      - ships-computer
+
+# Named volumes persist across `docker compose down` but are DESTROYED by
+# `docker compose down -v`. See warning at top of file.
+volumes:
+  nats-data:
+
+networks:
+  ships-computer:

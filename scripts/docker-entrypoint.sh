@@ -43,10 +43,16 @@ if [ -n "$missing_vars" ]; then
 fi
 
 # ---------------------------------------------------------------------------
-# Process templates with envsubst
+# Create required directories
 # ---------------------------------------------------------------------------
 # Create the output directory for processed config files
 mkdir -p "${OUTPUT_DIR}"
+# Create the log directory referenced in nats-server.conf
+mkdir -p /var/log/nats
+
+# ---------------------------------------------------------------------------
+# Process templates with envsubst
+# ---------------------------------------------------------------------------
 
 # Substitute environment variables in each .conf.template file
 for template in "${TEMPLATE_DIR}"/*.conf.template; do

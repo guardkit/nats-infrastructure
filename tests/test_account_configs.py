@@ -178,9 +178,9 @@ class TestAppmillaAccount:
         """APPMILLA account must have JetStream enabled."""
         appmilla_block = _extract_account_block(template_text, "APPMILLA")
         assert appmilla_block, "APPMILLA account block not found"
-        assert re.search(
-            r"jetstream\s*\{", appmilla_block, re.IGNORECASE
-        ), "APPMILLA must have JetStream enabled"
+        has_block = re.search(r"jetstream\s*\{", appmilla_block, re.IGNORECASE)
+        has_inline = re.search(r"jetstream\s*:\s*enabled", appmilla_block, re.IGNORECASE)
+        assert has_block or has_inline, "APPMILLA must have JetStream enabled"
 
 
 # --- AC-004: FINPROXY account with mark, scoped to finproxy.> ---
@@ -214,9 +214,9 @@ class TestFinproxyAccount:
         """FINPROXY must have JetStream enabled."""
         finproxy_block = _extract_account_block(template_text, "FINPROXY")
         assert finproxy_block, "FINPROXY account block not found"
-        assert re.search(
-            r"jetstream\s*\{", finproxy_block, re.IGNORECASE
-        ), "FINPROXY must have JetStream enabled"
+        has_block = re.search(r"jetstream\s*\{", finproxy_block, re.IGNORECASE)
+        has_inline = re.search(r"jetstream\s*:\s*enabled", finproxy_block, re.IGNORECASE)
+        assert has_block or has_inline, "FINPROXY must have JetStream enabled"
 
 
 # --- AC-005: SYS account with admin, designated as system_account ---

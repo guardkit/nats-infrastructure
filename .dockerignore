@@ -1,0 +1,13 @@
+.git
+docs/
+tasks/
+.claude/
+.guardkit/
+tests/
+*.md
+.env
+.env.example
+.gitignore
+__pycache__/
+.pytest_cache/
+.ruff_cache/
