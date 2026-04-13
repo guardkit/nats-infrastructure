@@ -1,4 +1,4 @@
-"""Tests for streams/provision-streams.sh — idempotent JetStream stream provisioning.
+"""Tests for streams/provision-streams.sh — idempotent JetStream stream & KV bucket provisioning.
 
 Validates all acceptance criteria for TASK-JSTR-002:
 - AC-001: Script reads all streams from stream-definitions.json
@@ -9,6 +9,11 @@ Validates all acceptance criteria for TASK-JSTR-002:
 - AC-006: Script exits 0 when all streams provisioned, non-zero only on fatal errors
 - AC-007: All modified files pass project-configured lint/format checks with zero errors
 
+Also validates TASK-JSTR-003 KV bucket provisioning:
+- AC-002: provision-streams.sh creates KV buckets after streams
+- AC-003: Idempotent: re-running does not error on existing buckets
+- AC-004: TTL values applied correctly (null = no TTL, persistent)
+
 Also validates seam test contract from TASK-JSTR-001:
 - Seam: stream-definitions.json format contract
 """
@@ -16,7 +21,9 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 import stat
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -70,6 +77,41 @@ class TestStrictErrorHandling:
         assert re.search(
             r"set\s+-euo\s+pipefail", script_text
         ), "Script must use 'set -euo pipefail' for strict error handling"
+
+
+# --- Shellcheck validation ---
+
+
+class TestShellcheck:
+    """Script passes shellcheck static analysis (skipped if shellcheck not installed)."""
+
+    @pytest.fixture(autouse=True)
+    def _require_shellcheck(self) -> None:
+        """Skip tests in this class if shellcheck is not installed."""
+        if shutil.which("shellcheck") is None:
+            pytest.skip("shellcheck not installed — install with: brew install shellcheck")
+
+    def test_script_passes_shellcheck(self) -> None:
+        """provision-streams.sh must pass shellcheck with zero errors."""
+        result = subprocess.run(
+            ["shellcheck", "--severity=error", str(SCRIPT_FILE)],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, (
+            f"shellcheck found errors in {SCRIPT_FILE.name}:\n{result.stdout}\n{result.stderr}"
+        )
+
+    def test_script_passes_shellcheck_warnings(self) -> None:
+        """provision-streams.sh should pass shellcheck with warnings enabled."""
+        result = subprocess.run(
+            ["shellcheck", "--severity=warning", str(SCRIPT_FILE)],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, (
+            f"shellcheck warnings in {SCRIPT_FILE.name}:\n{result.stdout}\n{result.stderr}"
+        )
 
 
 # --- AC-001: Script reads all streams from stream-definitions.json ---
@@ -439,3 +481,173 @@ class TestStreamDefinitionsContract:
             assert stream["retention"] in ("work", "limits"), (
                 f"Invalid retention: {stream['retention']}"
             )
+
+
+# =============================================================================
+# TASK-JSTR-003: KV Bucket Provisioning in provision-streams.sh
+# =============================================================================
+
+
+# --- AC-002: provision-streams.sh creates KV buckets after streams ---
+
+
+class TestKvBucketProvisioning:
+    """TASK-JSTR-003 AC-002: provision-streams.sh creates KV buckets after streams."""
+
+    def test_uses_nats_kv_add(self, script_text: str) -> None:
+        """Script must use 'nats kv add' for creating KV buckets."""
+        assert re.search(
+            r"nats\s+kv\s+add", script_text
+        ), "Script must use 'nats kv add' to create KV buckets"
+
+    def test_uses_nats_kv_info(self, script_text: str) -> None:
+        """Script must use 'nats kv info' to check KV bucket existence."""
+        assert re.search(
+            r"nats\s+kv\s+info", script_text
+        ), "Script must use 'nats kv info' to check KV bucket existence"
+
+    def test_uses_nats_kv_update(self, script_text: str) -> None:
+        """Script must use 'nats kv update' for updating existing KV buckets."""
+        assert re.search(
+            r"nats\s+kv\s+update", script_text
+        ), "Script must use 'nats kv update' to update existing KV buckets"
+
+    def test_reads_kv_buckets_from_json(self, script_text: str) -> None:
+        """Script must read .kv_buckets[] from JSON definitions."""
+        assert re.search(
+            r"\.kv_buckets", script_text
+        ), "Script must read .kv_buckets from stream-definitions.json"
+
+    def test_extracts_kv_bucket_name(self, script_text: str) -> None:
+        """Script must extract the name field from KV bucket definitions."""
+        assert re.search(
+            r"kv_buckets\[.*\]\.name", script_text
+        ), "Script must extract .name from each KV bucket definition"
+
+    def test_extracts_kv_bucket_ttl(self, script_text: str) -> None:
+        """Script must extract the ttl field from KV bucket definitions."""
+        assert re.search(
+            r"kv_buckets\[.*\]\.ttl", script_text
+        ), "Script must extract .ttl from each KV bucket definition"
+
+    def test_has_provision_kv_bucket_function(self, script_text: str) -> None:
+        """Script must have a provision_kv_bucket function."""
+        assert re.search(
+            r"provision_kv_bucket\(\)", script_text
+        ), "Script must define a provision_kv_bucket() function"
+
+    def test_kv_bucket_section_after_streams(self, script_text: str) -> None:
+        """KV bucket provisioning must appear after stream provisioning in main()."""
+        stream_provision_pos = script_text.find("provision_stream ")
+        kv_provision_pos = script_text.find("provision_kv_bucket ")
+        assert stream_provision_pos > 0, "Script must call provision_stream"
+        assert kv_provision_pos > 0, "Script must call provision_kv_bucket"
+        assert kv_provision_pos > stream_provision_pos, (
+            "KV bucket provisioning must come after stream provisioning"
+        )
+
+
+# --- AC-003: Idempotent: re-running does not error on existing buckets ---
+
+
+class TestKvBucketIdempotency:
+    """TASK-JSTR-003 AC-003: Idempotent KV bucket provisioning."""
+
+    def test_checks_kv_existence_before_create(self, script_text: str) -> None:
+        """Script must check if KV bucket exists before creating."""
+        assert re.search(
+            r"nats\s+kv\s+info", script_text
+        ), "Script must check KV bucket existence with 'nats kv info'"
+
+    def test_logs_kv_create_action(self, script_text: str) -> None:
+        """Script must log [CREATE] when creating a new KV bucket."""
+        assert re.search(
+            r"\[CREATE\].*KV", script_text
+        ), "Script must log [CREATE] KV prefix when creating a KV bucket"
+
+    def test_logs_kv_ok_action(self, script_text: str) -> None:
+        """Script must log [OK] when KV bucket already exists and is current."""
+        assert re.search(
+            r"\[OK\].*KV", script_text
+        ), "Script must log [OK] KV for existing buckets that are current"
+
+    def test_logs_kv_update_action(self, script_text: str) -> None:
+        """Script must log [UPDATE] when updating a KV bucket."""
+        assert re.search(
+            r"\[UPDATE\].*KV", script_text
+        ), "Script must log [UPDATE] KV when updating a bucket"
+
+    def test_logs_kv_error_action(self, script_text: str) -> None:
+        """Script must log [ERROR] when KV bucket operation fails."""
+        assert re.search(
+            r"\[ERROR\].*KV", script_text
+        ), "Script must log [ERROR] KV when bucket operation fails"
+
+    def test_kv_dry_run_support(self, script_text: str) -> None:
+        """Script must support dry-run mode for KV bucket operations."""
+        assert re.search(
+            r"\[DRY-RUN\].*KV", script_text
+        ), "Script must support [DRY-RUN] mode for KV bucket operations"
+
+
+# --- AC-004: TTL values applied correctly ---
+
+
+class TestKvBucketTtlProvisioning:
+    """TASK-JSTR-003 AC-004: TTL values applied correctly in provisioning."""
+
+    def test_supports_ttl_flag(self, script_text: str) -> None:
+        """Script must support --ttl flag for KV bucket creation."""
+        assert re.search(
+            r"--ttl", script_text
+        ), "Script must use --ttl flag for KV buckets with TTL"
+
+    def test_handles_null_ttl(self, script_text: str) -> None:
+        """Script must handle null/empty TTL (persistent buckets)."""
+        assert re.search(
+            r'(null|"null"|empty)', script_text
+        ), "Script must handle null TTL values for persistent buckets"
+
+    def test_ttl_is_conditional(self, script_text: str) -> None:
+        """TTL flag must only be applied when TTL is non-null."""
+        # Look for conditional TTL application
+        assert re.search(
+            r"ttl_opts", script_text
+        ), "Script must conditionally apply TTL flags"
+
+
+# --- KV bucket summary ---
+
+
+class TestKvBucketSummary:
+    """Script must include KV bucket counts in summary output."""
+
+    def test_tracks_kv_created_count(self, script_text: str) -> None:
+        """Script must track count of created KV buckets."""
+        assert re.search(
+            r"kv_created", script_text
+        ), "Script must track kv_created count"
+
+    def test_tracks_kv_updated_count(self, script_text: str) -> None:
+        """Script must track count of updated KV buckets."""
+        assert re.search(
+            r"kv_updated", script_text
+        ), "Script must track kv_updated count"
+
+    def test_tracks_kv_current_count(self, script_text: str) -> None:
+        """Script must track count of already-current KV buckets."""
+        assert re.search(
+            r"kv_current", script_text
+        ), "Script must track kv_current count"
+
+    def test_tracks_kv_error_count(self, script_text: str) -> None:
+        """Script must track count of KV bucket errors."""
+        assert re.search(
+            r"kv_errors", script_text
+        ), "Script must track kv_errors count"
+
+    def test_prints_kv_summary_line(self, script_text: str) -> None:
+        """Script must print a KV bucket summary line."""
+        assert re.search(
+            r"KV Bucket", script_text
+        ), "Script must print a KV Buckets summary line"

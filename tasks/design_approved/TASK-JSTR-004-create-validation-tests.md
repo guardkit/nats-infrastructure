@@ -1,17 +1,23 @@
 ---
-id: TASK-JSTR-004
-title: "Create validation tests for stream definitions and provisioning"
-task_type: testing
-parent_review: TASK-REV-E14C
-feature_id: FEAT-JSTR
-wave: 3
-implementation_mode: task-work
 complexity: 4
-dependencies: [TASK-JSTR-001, TASK-JSTR-002]
-status: pending
-priority: high
-tags: [testing, validation, streams, shellcheck]
+dependencies:
+- TASK-JSTR-001
+- TASK-JSTR-002
 estimated_minutes: 45
+feature_id: FEAT-JSTR
+id: TASK-JSTR-004
+implementation_mode: task-work
+parent_review: TASK-REV-E14C
+priority: high
+status: design_approved
+tags:
+- testing
+- validation
+- streams
+- shellcheck
+task_type: testing
+title: Create validation tests for stream definitions and provisioning
+wave: 3
 ---
 
 # Task: Create validation tests

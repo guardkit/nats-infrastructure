@@ -33,6 +33,110 @@ See [`.env.example`](.env.example) for all required environment variables and th
 - **Server config** — `nats-server.conf` with JetStream enabled, Tailscale-accessible
 - **Account auth** — APPMILLA (Rich + James, full access), FINPROXY (Mark, scoped), SYS (admin)
 - **Ops scripts** — verification, health checks
+- **JetStream streams** — 6 core + project streams and KV buckets with idempotent provisioning
+
+## JetStream Streams
+
+All JetStream streams and KV buckets are defined declaratively in
+[`streams/stream-definitions.json`](streams/stream-definitions.json) and provisioned
+by the idempotent [`streams/provision-streams.sh`](streams/provision-streams.sh) script.
+
+### Core Streams
+
+| Stream | Subjects | Retention | Max Age | Description |
+|--------|----------|-----------|---------|-------------|
+| PIPELINE | `pipeline.>` | work | 7d | Dev pipeline events — feature planning through build completion |
+| AGENTS | `agents.>` | limits | 24h | Agent status, approval requests/responses, commands, results |
+| JARVIS | `jarvis.>` | limits | 1h | Intent classification, dispatch, routing — high volume, short lived |
+| NOTIFICATIONS | `notifications.>` | work | 24h | Outbound notifications to adapters |
+| SYSTEM | `system.>` | limits | 1h | Health checks, config updates |
+| FLEET | `fleet.>` | limits | 1h | Agent registration, deregistration, heartbeats |
+
+### Project Streams
+
+| Stream | Subjects | Retention | Max Age | Description |
+|--------|----------|-----------|---------|-------------|
+| FINPROXY | `finproxy.>` | work | 24h | All FinProxy events — isolated from main streams |
+
+Project streams are scoped to individual client accounts. FINPROXY is isolated to the
+FINPROXY NATS account (Mark), enforced at the account permission level.
+
+### KV Buckets
+
+JetStream KV buckets provide key-value storage backed by streams. They are defined in
+the `kv_buckets` array of `stream-definitions.json` and provisioned alongside streams.
+
+| Bucket | TTL | Description |
+|--------|-----|-------------|
+| agent-status | — | Last known status per agent — replaces polling |
+| agent-registry | — | Fleet routing table — agent capability manifests, used by Jarvis for routing |
+| pipeline-state | 7d | Current pipeline state per feature_id |
+| jarvis-session | 1h | Jarvis conversation session context |
+
+Buckets with no TTL (`null`) are persistent — keys remain until explicitly deleted.
+Buckets with a TTL automatically expire keys after the specified duration.
+
+### Provisioning Commands
+
+```bash
+# Provision all streams and KV buckets (idempotent — safe to run multiple times)
+./streams/provision-streams.sh
+
+# Preview what would happen without making changes
+./streams/provision-streams.sh --dry-run
+
+# Use a custom NATS URL
+NATS_URL=nats://nats:4222 ./streams/provision-streams.sh
+
+# Use credentials file
+NATS_CREDS=/path/to/creds.nk ./streams/provision-streams.sh
+```
+
+**Prerequisites**: `jq` and the [NATS CLI](https://github.com/nats-io/natscli) must be
+installed. The script waits for the NATS server to be healthy before provisioning.
+
+### Idempotency Guarantees
+
+The provisioning script uses a **check-then-create-or-update** pattern that is safe to
+run on first deploy, on reboot, and after definition changes. The same idempotency
+pattern applies to both streams and KV buckets:
+
+1. **Resource does not exist** → `[CREATE]` — creates the stream or KV bucket with the defined config
+2. **Resource exists and config matches** → `[OK]` — no changes made
+3. **Resource exists but config differs** → `[UPDATE]` — updates the stream via `nats stream update --force` or the KV bucket via `nats kv update`
+4. **Resource operation fails** → `[ERROR]` — logged but does not halt remaining resources
+
+The script always exits 0 unless a fatal error occurs (missing `jq`, unreachable NATS
+server, missing definitions file). A summary is printed at the end:
+
+```
+Streams:    X created, Y updated, Z already current, W errors
+KV Buckets: X created, Y updated, Z already current, W errors
+```
+
+### Adding a New Stream
+
+To add a new project stream:
+
+1. **Define the stream** — Add a new entry to `streams/stream-definitions.json`:
+   ```json
+   {
+     "name": "MYPROJECT",
+     "subjects": ["myproject.>"],
+     "retention": "work",
+     "max_age": "24h",
+     "max_msgs": 5000,
+     "storage": "file",
+     "replicas": 1,
+     "scope": "project",
+     "description": "MyProject events — isolated from main streams"
+   }
+   ```
+2. **Add account permissions** — Update `config/accounts/accounts.conf.template` to
+   grant the appropriate NATS account access to the new subject namespace.
+3. **Provision** — Run `./streams/provision-streams.sh` (or `--dry-run` to preview).
+4. **Update tests** — Add the new stream to the expected streams in
+   `tests/test_stream_definitions.py`.
 
 ## Dockerfile and Build Context
 

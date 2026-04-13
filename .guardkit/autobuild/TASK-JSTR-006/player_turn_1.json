@@ -1,0 +1,69 @@
+{
+  "task_id": "TASK-JSTR-006",
+  "turn": 1,
+  "files_modified": [
+    "README.md",
+    "tests/test_readme.py"
+  ],
+  "files_created": [
+    "tests/test_readme_streams.py"
+  ],
+  "tests_written": [
+    "tests/test_readme_streams.py"
+  ],
+  "tests_run": true,
+  "tests_passed": true,
+  "test_output_summary": "81 README tests passed (38 existing + 43 new). Full suite: 406 passed, 4 failed (pre-existing integration tests requiring Docker infrastructure, unrelated to changes).",
+  "implementation_notes": "Added a comprehensive 'JetStream Streams' section to README.md documenting all 6 core streams and 1 project stream in tables, provisioning commands with environment variable options, idempotency guarantees with the check-then-create-or-update pattern, and a step-by-step guide for adding new project streams. Created 43 new tests in test_readme_streams.py validating all 5 acceptance criteria. Updated test_readme.py to fix a now-obsolete test that asserted provision-streams.sh should NOT be in README (from TASK-DCD-005, predating stream provisioning work).",
+  "concerns": [],
+  "requirements_addressed": [
+    "AC-001: README.md has a JetStream Streams section",
+    "AC-002: All 6 core streams listed with purpose",
+    "AC-003: Provisioning commands documented",
+    "AC-004: Idempotency guarantees explained",
+    "AC-005: Project stream addition process documented"
+  ],
+  "requirements_remaining": [],
+  "completion_promises": [
+    {
+      "criterion_id": "AC-001",
+      "criterion_text": "README.md has a \"JetStream Streams\" section",
+      "status": "complete",
+      "evidence": "Added '## JetStream Streams' section to README.md after 'What's In The Box' and before 'Dockerfile and Build Context'. Section contains subsections for Core Streams, Project Streams, Provisioning Commands, Idempotency Guarantees, and Adding a New Stream. References stream-definitions.json and provision-streams.sh.",
+      "test_file": "tests/test_readme_streams.py",
+      "implementation_files": ["README.md"]
+    },
+    {
+      "criterion_id": "AC-002",
+      "criterion_text": "All 6 core streams listed with purpose",
+      "status": "complete",
+      "evidence": "Created a '### Core Streams' subsection with a markdown table listing all 6 streams (PIPELINE, AGENTS, JARVIS, NOTIFICATIONS, SYSTEM, FLEET) with columns for Stream, Subjects, Retention, Max Age, and Description. Each stream's description matches stream-definitions.json. Tests verify each stream name, subject pattern, and table structure via parametrized tests.",
+      "test_file": "tests/test_readme_streams.py",
+      "implementation_files": ["README.md"]
+    },
+    {
+      "criterion_id": "AC-003",
+      "criterion_text": "Provisioning commands documented",
+      "status": "complete",
+      "evidence": "Created a '### Provisioning Commands' subsection with bash code blocks showing: basic provisioning, --dry-run preview, custom NATS_URL, and NATS_CREDS usage. Documents prerequisites (jq, NATS CLI) with link. Updated test_readme.py to accept provision-streams.sh reference (was previously blocked by obsolete test from TASK-DCD-005).",
+      "test_file": "tests/test_readme_streams.py",
+      "implementation_files": ["README.md", "tests/test_readme.py"]
+    },
+    {
+      "criterion_id": "AC-004",
+      "criterion_text": "Idempotency guarantees explained",
+      "status": "complete",
+      "evidence": "Created a '### Idempotency Guarantees' subsection explaining the check-then-create-or-update pattern with 4 numbered scenarios ([CREATE], [OK], [UPDATE], [ERROR]). Explains that it's safe to run on first deploy, on reboot, and after definition changes. Documents exit code behaviour and summary output format.",
+      "test_file": "tests/test_readme_streams.py",
+      "implementation_files": ["README.md"]
+    },
+    {
+      "criterion_id": "AC-005",
+      "criterion_text": "Project stream addition process documented",
+      "status": "complete",
+      "evidence": "Created a '### Adding a New Stream' subsection with 4 numbered steps: (1) add JSON entry to stream-definitions.json with example, (2) update account permissions in accounts.conf.template, (3) run provision-streams.sh, (4) update tests. Includes a full JSON example with scope: project. Also created '### Project Streams' subsection showing FINPROXY as the existing project stream with isolation explanation.",
+      "test_file": "tests/test_readme_streams.py",
+      "implementation_files": ["README.md"]
+    }
+  ]
+}

@@ -75,10 +75,10 @@ class TestQuickStartSection:
             "README should not reference non-existent setup-gb10.sh script"
         )
 
-    def test_no_obsolete_provision_streams_reference(self, readme_text: str) -> None:
-        """Ensure obsolete scripts that don't exist are not referenced as commands."""
-        assert "provision-streams.sh" not in readme_text, (
-            "README should not reference non-existent provision-streams.sh script"
+    def test_provision_streams_reference_in_streams_section(self, readme_text: str) -> None:
+        """provision-streams.sh exists and is documented in the JetStream Streams section."""
+        assert "provision-streams.sh" in readme_text, (
+            "README should reference the provision-streams.sh script in the JetStream Streams section"
         )
 
 

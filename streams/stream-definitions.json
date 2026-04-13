@@ -77,5 +77,27 @@
       "scope": "project",
       "description": "All FinProxy events — isolated from main streams"
     }
+  ],
+  "kv_buckets": [
+    {
+      "name": "agent-status",
+      "ttl": null,
+      "description": "Last known status per agent — replaces polling"
+    },
+    {
+      "name": "agent-registry",
+      "ttl": null,
+      "description": "Fleet routing table — agent capability manifests, used by Jarvis for routing"
+    },
+    {
+      "name": "pipeline-state",
+      "ttl": "7d",
+      "description": "Current pipeline state per feature_id"
+    },
+    {
+      "name": "jarvis-session",
+      "ttl": "1h",
+      "description": "Jarvis conversation session context"
+    }
   ]
 }

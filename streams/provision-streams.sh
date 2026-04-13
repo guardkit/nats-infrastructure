@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # =============================================================================
-# provision-streams.sh — Idempotent JetStream Stream Provisioning
+# provision-streams.sh — Idempotent JetStream Stream & KV Bucket Provisioning
 # =============================================================================
-# Reads stream definitions from streams/stream-definitions.json and applies the
-# check-then-create-or-update idempotency pattern for each stream.
+# Reads stream and KV bucket definitions from streams/stream-definitions.json
+# and applies the check-then-create-or-update idempotency pattern for each.
 #
 # Safe to run multiple times: on first deploy, on reboot, and after definition changes.
 #
@@ -12,7 +12,7 @@
 #   NATS_CREDS  — Path to NATS credentials file (optional)
 #
 # Usage:
-#   ./streams/provision-streams.sh              # Provision all streams
+#   ./streams/provision-streams.sh              # Provision all streams and KV buckets
 #   ./streams/provision-streams.sh --dry-run    # Preview actions without modifying
 #
 # Requires: jq, nats CLI
@@ -39,11 +39,17 @@ if [[ "${1:-}" == "--dry-run" ]]; then
     echo "=== DRY RUN MODE — no changes will be made ==="
 fi
 
-# Summary counters
+# Summary counters — streams
 created=0
 updated=0
 current=0
 errors=0
+
+# Summary counters — KV buckets
+kv_created=0
+kv_updated=0
+kv_current=0
+kv_errors=0
 
 # ---------------------------------------------------------------------------
 # Prerequisite checks
@@ -191,11 +197,64 @@ provision_stream() {
 }
 
 # ---------------------------------------------------------------------------
+# Provision a single KV bucket
+# ---------------------------------------------------------------------------
+provision_kv_bucket() {
+    local name="$1"
+    local ttl="$2"
+
+    # Build TTL flags — null/empty means no TTL (persistent)
+    local ttl_opts=()
+    if [[ -n "$ttl" ]] && [[ "$ttl" != "null" ]]; then
+        ttl_opts=("--ttl" "$ttl")
+    fi
+
+    # Check if KV bucket already exists via: nats kv info <NAME>
+    if nats kv info "$name" "${NATS_OPTS[@]}" >/dev/null 2>&1; then
+        # Bucket exists — check if update is needed
+        if [[ "$DRY_RUN" == "true" ]]; then
+            echo "[DRY-RUN] Would check/update KV bucket: $name"
+            kv_current=$((kv_current + 1))
+            return 0
+        fi
+
+        # Update bucket (e.g. TTL change) — nats kv update is idempotent
+        if [[ ${#ttl_opts[@]} -gt 0 ]]; then
+            if nats kv update "$name" "${NATS_OPTS[@]}" "${ttl_opts[@]}" >/dev/null 2>&1; then
+                echo "[UPDATE] KV $name"
+                kv_updated=$((kv_updated + 1))
+            else
+                echo "[ERROR] KV $name — failed to update bucket" >&2
+                kv_errors=$((kv_errors + 1))
+            fi
+        else
+            echo "[OK] KV $name"
+            kv_current=$((kv_current + 1))
+        fi
+    else
+        # Bucket does not exist — create via: nats kv add <NAME>
+        if [[ "$DRY_RUN" == "true" ]]; then
+            echo "[DRY-RUN] Would create KV bucket: $name (ttl=${ttl:-none})"
+            kv_created=$((kv_created + 1))
+            return 0
+        fi
+
+        if nats kv add "$name" "${NATS_OPTS[@]}" "${ttl_opts[@]}" >/dev/null 2>&1; then
+            echo "[CREATE] KV $name"
+            kv_created=$((kv_created + 1))
+        else
+            echo "[ERROR] KV $name — failed to create bucket" >&2
+            kv_errors=$((kv_errors + 1))
+        fi
+    fi
+}
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 main() {
     echo "=========================================="
-    echo "JetStream Stream Provisioning"
+    echo "JetStream Stream & KV Bucket Provisioning"
     echo "=========================================="
     echo "NATS URL:    ${NATS_URL}"
     echo "Definitions: ${STREAM_DEFS_FILE}"
@@ -231,18 +290,47 @@ main() {
     done
 
     # ---------------------------------------------------------------------------
+    # Provision KV buckets (after streams)
+    # ---------------------------------------------------------------------------
+    echo ""
+    echo "=========================================="
+    echo "KV Bucket Provisioning"
+    echo "=========================================="
+
+    # Count total KV buckets from .kv_buckets[] array (default to 0 if missing)
+    local kv_total
+    kv_total=$(jq '.kv_buckets // [] | length' "$STREAM_DEFS_FILE")
+    echo "Processing ${kv_total} KV bucket definitions..."
+    echo ""
+
+    # Iterate over each KV bucket in .kv_buckets[] and extract fields
+    local j=0
+    while [[ $j -lt $kv_total ]]; do
+        local kv_name kv_ttl
+
+        kv_name=$(jq -r ".kv_buckets[$j].name" "$STREAM_DEFS_FILE")
+        kv_ttl=$(jq -r ".kv_buckets[$j].ttl // empty" "$STREAM_DEFS_FILE")
+
+        provision_kv_bucket "$kv_name" "$kv_ttl"
+
+        j=$((j + 1))
+    done
+
+    # ---------------------------------------------------------------------------
     # Summary
     # ---------------------------------------------------------------------------
     echo ""
     echo "=========================================="
-    echo "Summary: ${created} created, ${updated} updated, ${current} already current, ${errors} errors"
+    echo "Streams:    ${created} created, ${updated} updated, ${current} already current, ${errors} errors"
+    echo "KV Buckets: ${kv_created} created, ${kv_updated} updated, ${kv_current} already current, ${kv_errors} errors"
     echo "=========================================="
 
-    if [[ $errors -gt 0 ]]; then
-        echo "WARNING: ${errors} stream(s) had errors. Check output above." >&2
+    local total_errors=$((errors + kv_errors))
+    if [[ $total_errors -gt 0 ]]; then
+        echo "WARNING: ${total_errors} resource(s) had errors. Check output above." >&2
     fi
 
-    # Exit 0 even with non-fatal errors (streams are processed individually)
+    # Exit 0 even with non-fatal errors (resources are processed individually)
     # Only fatal errors (missing jq, no NATS, missing file) cause non-zero exit
     exit 0
 }
