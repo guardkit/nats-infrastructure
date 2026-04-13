@@ -10,6 +10,7 @@
 #   2. JetStream is initialised and reporting memory/storage info
 #   3. Server name is 'ships-computer' and version is reported
 #   4. (Optional) Account authentication via nats CLI
+#   5. (Optional) JetStream streams provisioned — requires nats CLI
 #
 # Usage:
 #   ./scripts/verify-nats.sh
@@ -20,7 +21,7 @@
 #
 # Dependencies:
 #   Required: curl
-#   Optional: jq (for JSON parsing), nats CLI (for auth checks)
+#   Optional: jq (for JSON parsing), nats CLI (for auth + stream checks)
 # =============================================================================
 
 set -u
@@ -232,6 +233,38 @@ if has_command nats; then
     fi
 else
     echo "  [SKIP] Account authentication checks — nats CLI not installed"
+    echo "         Install: https://github.com/nats-io/natscli"
+fi
+echo ""
+
+# ---------------------------------------------------------------------------
+# Check 5: JetStream streams provisioned (optional — requires nats CLI)
+# ---------------------------------------------------------------------------
+echo "--- Check 5: JetStream Streams (Optional) ---"
+
+if has_command nats; then
+    EXPECTED_STREAMS="PIPELINE AGENTS JARVIS NOTIFICATIONS SYSTEM FLEET FINPROXY"
+    streams_ok=0
+    streams_missing=0
+
+    for stream in $EXPECTED_STREAMS; do
+        if nats stream info "$stream" --server "${NATS_URL:-nats://localhost:4222}" --json >/dev/null 2>&1; then
+            echo "  [OK] $stream"
+            streams_ok=$((streams_ok + 1))
+        else
+            echo "  [MISSING] $stream"
+            streams_missing=$((streams_missing + 1))
+        fi
+    done
+
+    echo ""
+    echo "  Streams: ${streams_ok} found, ${streams_missing} missing"
+
+    if [ "$streams_missing" -gt 0 ]; then
+        echo "  NOTE: Missing streams can be provisioned with: ./streams/provision-streams.sh"
+    fi
+else
+    echo "  [SKIP] JetStream stream checks — nats CLI not installed"
     echo "         Install: https://github.com/nats-io/natscli"
 fi
 echo ""

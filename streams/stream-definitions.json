@@ -1,0 +1,103 @@
+{
+  "streams": [
+    {
+      "name": "PIPELINE",
+      "subjects": ["pipeline.>"],
+      "retention": "work",
+      "max_age": "7d",
+      "max_msgs": 10000,
+      "storage": "file",
+      "replicas": 1,
+      "scope": "core",
+      "description": "Dev pipeline events — feature planning through build completion"
+    },
+    {
+      "name": "AGENTS",
+      "subjects": ["agents.>"],
+      "retention": "limits",
+      "max_age": "24h",
+      "max_msgs": 5000,
+      "storage": "file",
+      "replicas": 1,
+      "scope": "core",
+      "description": "Agent status, approval requests/responses, commands, results"
+    },
+    {
+      "name": "JARVIS",
+      "subjects": ["jarvis.>"],
+      "retention": "limits",
+      "max_age": "1h",
+      "max_msgs": 1000,
+      "storage": "file",
+      "replicas": 1,
+      "scope": "core",
+      "description": "Intent classification, dispatch, routing — high volume, short lived"
+    },
+    {
+      "name": "NOTIFICATIONS",
+      "subjects": ["notifications.>"],
+      "retention": "work",
+      "max_age": "24h",
+      "max_msgs": 1000,
+      "storage": "file",
+      "replicas": 1,
+      "scope": "core",
+      "description": "Outbound notifications to adapters"
+    },
+    {
+      "name": "SYSTEM",
+      "subjects": ["system.>"],
+      "retention": "limits",
+      "max_age": "1h",
+      "max_msgs": 500,
+      "storage": "file",
+      "replicas": 1,
+      "scope": "core",
+      "description": "Health checks, config updates"
+    },
+    {
+      "name": "FLEET",
+      "subjects": ["fleet.>"],
+      "retention": "limits",
+      "max_age": "1h",
+      "max_msgs": 5000,
+      "storage": "file",
+      "replicas": 1,
+      "scope": "core",
+      "description": "Agent registration, deregistration, heartbeats"
+    },
+    {
+      "name": "FINPROXY",
+      "subjects": ["finproxy.>"],
+      "retention": "work",
+      "max_age": "24h",
+      "max_msgs": 5000,
+      "storage": "file",
+      "replicas": 1,
+      "scope": "project",
+      "description": "All FinProxy events — isolated from main streams"
+    }
+  ],
+  "kv_buckets": [
+    {
+      "name": "agent-status",
+      "ttl": null,
+      "description": "Last known status per agent — replaces polling"
+    },
+    {
+      "name": "agent-registry",
+      "ttl": null,
+      "description": "Fleet routing table — agent capability manifests, used by Jarvis for routing"
+    },
+    {
+      "name": "pipeline-state",
+      "ttl": "7d",
+      "description": "Current pipeline state per feature_id"
+    },
+    {
+      "name": "jarvis-session",
+      "ttl": "1h",
+      "description": "Jarvis conversation session context"
+    }
+  ]
+}
