@@ -1,0 +1,56 @@
+id: FEAT-A4E7
+name: "Operations Scripts"
+description: "Shell scripts for operational management: setup-gb10.sh (one-shot GB10 deployment), health-check.sh (monitoring probe), backup-jetstream.sh (rsync to NAS)"
+created: "2026-04-13T00:00:00Z"
+status: planned
+complexity: 4
+estimated_tasks: 4
+
+tasks:
+  - id: TASK-OPS-001
+    name: "Create setup-gb10.sh one-shot deployment script"
+    file_path: "tasks/backlog/operations-scripts/TASK-OPS-001-create-setup-gb10-script.md"
+    complexity: 4
+    dependencies: []
+    status: pending
+    implementation_mode: task-work
+    estimated_minutes: 90
+
+  - id: TASK-OPS-002
+    name: "Create health-check.sh monitoring probe"
+    file_path: "tasks/backlog/operations-scripts/TASK-OPS-002-create-health-check-script.md"
+    complexity: 2
+    dependencies: []
+    status: pending
+    implementation_mode: direct
+    estimated_minutes: 45
+
+  - id: TASK-OPS-003
+    name: "Create backup-jetstream.sh NAS backup script"
+    file_path: "tasks/backlog/operations-scripts/TASK-OPS-003-create-backup-jetstream-script.md"
+    complexity: 3
+    dependencies: []
+    status: pending
+    implementation_mode: direct
+    estimated_minutes: 60
+
+  - id: TASK-OPS-004
+    name: "Test operations scripts against running NATS"
+    file_path: "tasks/backlog/operations-scripts/TASK-OPS-004-test-operations-scripts.md"
+    complexity: 3
+    dependencies:
+      - TASK-OPS-001
+      - TASK-OPS-002
+      - TASK-OPS-003
+    status: pending
+    implementation_mode: direct
+    estimated_minutes: 30
+
+orchestration:
+  parallel_groups:
+    - - TASK-OPS-001
+      - TASK-OPS-002
+      - TASK-OPS-003
+    - - TASK-OPS-004
+  estimated_duration_minutes: 225
+  recommended_parallel: 3

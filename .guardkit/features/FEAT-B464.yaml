@@ -1,0 +1,123 @@
+id: FEAT-B464
+name: Docker Compose Deployment
+description: NATS server with JetStream, volume persistence, health checks, custom
+  entrypoint
+created: '2026-04-13T00:00:00Z'
+status: completed
+complexity: 4
+estimated_tasks: 5
+tasks:
+- id: TASK-DCD-001
+  name: Create docker-compose.yml with NATS service
+  file_path: tasks/backlog/docker-compose-deployment/TASK-DCD-001-create-docker-compose-yml.md
+  complexity: 3
+  dependencies: []
+  status: completed
+  implementation_mode: task-work
+  estimated_minutes: 30
+  requires_infrastructure: []
+  result:
+    total_turns: 1
+    final_decision: approved
+    error: null
+  turns_completed: 1
+  current_turn: 0
+  started_at: '2026-04-13T20:19:45.262043'
+  completed_at: '2026-04-13T20:26:50.961625'
+- id: TASK-DCD-002
+  name: Create Dockerfile for custom entrypoint
+  file_path: tasks/backlog/docker-compose-deployment/TASK-DCD-002-create-dockerfile-custom-entrypoint.md
+  complexity: 3
+  dependencies: []
+  status: completed
+  implementation_mode: task-work
+  estimated_minutes: 30
+  requires_infrastructure: []
+  result:
+    total_turns: 1
+    final_decision: approved
+    error: null
+  turns_completed: 1
+  current_turn: 0
+  started_at: '2026-04-13T20:19:45.264720'
+  completed_at: '2026-04-13T20:26:50.964142'
+- id: TASK-DCD-003
+  name: Verify compose up NATS starts health check passes
+  file_path: tasks/backlog/docker-compose-deployment/TASK-DCD-003-verify-compose-up-nats-starts.md
+  complexity: 2
+  dependencies:
+  - TASK-DCD-001
+  - TASK-DCD-002
+  status: completed
+  implementation_mode: direct
+  estimated_minutes: 20
+  requires_infrastructure: []
+  result:
+    total_turns: 1
+    final_decision: approved
+    error: null
+  turns_completed: 1
+  current_turn: 0
+  started_at: '2026-04-13T20:26:50.974592'
+  completed_at: '2026-04-13T20:37:29.830906'
+- id: TASK-DCD-004
+  name: Verify volume persistence JetStream data survives
+  file_path: tasks/backlog/docker-compose-deployment/TASK-DCD-004-verify-volume-persistence.md
+  complexity: 2
+  dependencies:
+  - TASK-DCD-001
+  - TASK-DCD-002
+  status: completed
+  implementation_mode: direct
+  estimated_minutes: 20
+  requires_infrastructure: []
+  result:
+    total_turns: 1
+    final_decision: approved
+    error: null
+  turns_completed: 1
+  current_turn: 0
+  started_at: '2026-04-13T20:26:50.977202'
+  completed_at: '2026-04-13T20:37:29.833858'
+- id: TASK-DCD-005
+  name: Update README with deployment instructions
+  file_path: tasks/backlog/docker-compose-deployment/TASK-DCD-005-update-readme-deployment-instructions.md
+  complexity: 1
+  dependencies:
+  - TASK-DCD-001
+  - TASK-DCD-002
+  status: completed
+  implementation_mode: direct
+  estimated_minutes: 15
+  requires_infrastructure: []
+  result:
+    total_turns: 1
+    final_decision: approved
+    error: null
+  turns_completed: 1
+  current_turn: 0
+  started_at: '2026-04-13T20:26:50.979694'
+  completed_at: '2026-04-13T20:37:29.836608'
+orchestration:
+  parallel_groups:
+  - - TASK-DCD-001
+    - TASK-DCD-002
+  - - TASK-DCD-003
+    - TASK-DCD-004
+    - TASK-DCD-005
+  estimated_duration_minutes: 115
+  recommended_parallel: 2
+execution:
+  started_at: '2026-04-13T20:19:45.227129'
+  completed_at: '2026-04-13T20:37:29.843306'
+  worktree_path: /Users/richardwoollcott/Projects/appmilla_github/nats-infrastructure/.guardkit/worktrees/FEAT-B464
+  total_turns: 5
+  tasks_completed: 5
+  tasks_failed: 0
+  current_wave: 2
+  completed_waves:
+  - 1
+  - 2
+  last_updated: '2026-04-13T20:37:29.839522'
+  archived_at: null
+  archived_to: null

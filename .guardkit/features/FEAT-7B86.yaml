@@ -1,0 +1,66 @@
+id: FEAT-7B86
+name: "KV Stores - agent-status, agent-registry, pipeline-state, jarvis-session buckets"
+description: "Add NATS JetStream KV bucket provisioning for agent fleet state management"
+created: "2026-04-13T00:00:00Z"
+status: planned
+complexity: 4
+estimated_tasks: 5
+
+tasks:
+  - id: TASK-KV-001
+    name: "Create kv-definitions.json with 4 bucket definitions"
+    file_path: "tasks/backlog/kv-stores/TASK-KV-001-create-kv-definitions-json.md"
+    complexity: 2
+    dependencies: []
+    status: pending
+    implementation_mode: direct
+    estimated_minutes: 20
+
+  - id: TASK-KV-002
+    name: "Create provision-kv.sh with idempotent KV bucket provisioning"
+    file_path: "tasks/backlog/kv-stores/TASK-KV-002-create-provision-kv-script.md"
+    complexity: 4
+    dependencies:
+      - TASK-KV-001
+    status: pending
+    implementation_mode: task-work
+    estimated_minutes: 45
+
+  - id: TASK-KV-003
+    name: "Update setup-gb10.sh to call KV provisioning"
+    file_path: "tasks/backlog/kv-stores/TASK-KV-003-update-setup-gb10-script.md"
+    complexity: 2
+    dependencies:
+      - TASK-KV-002
+    status: pending
+    implementation_mode: direct
+    estimated_minutes: 15
+
+  - id: TASK-KV-004
+    name: "Document KV usage patterns in README"
+    file_path: "tasks/backlog/kv-stores/TASK-KV-004-document-kv-usage-patterns.md"
+    complexity: 2
+    dependencies: []
+    status: pending
+    implementation_mode: direct
+    estimated_minutes: 30
+
+  - id: TASK-KV-005
+    name: "Test KV watch - agent-status and agent-registry scenarios"
+    file_path: "tasks/backlog/kv-stores/TASK-KV-005-test-kv-watch-scenarios.md"
+    complexity: 3
+    dependencies:
+      - TASK-KV-002
+    status: pending
+    implementation_mode: direct
+    estimated_minutes: 30
+
+orchestration:
+  parallel_groups:
+    - - TASK-KV-001
+      - TASK-KV-004
+    - - TASK-KV-002
+    - - TASK-KV-003
+      - TASK-KV-005
+  estimated_duration_minutes: 140
+  recommended_parallel: 2
