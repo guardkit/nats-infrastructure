@@ -1,23 +1,29 @@
 ---
-id: TASK-JSTR-002
-title: "Create provision-streams.sh with idempotent check/create/update"
-task_type: feature
-parent_review: TASK-REV-E14C
-feature_id: FEAT-JSTR
-wave: 2
-implementation_mode: task-work
 complexity: 5
-dependencies: [TASK-JSTR-001]
-status: pending
-priority: high
-tags: [jetstream, provisioning, idempotency, shell]
-estimated_minutes: 60
 consumer_context:
-  - task: TASK-JSTR-001
-    consumes: stream-definitions.json
-    framework: "jq + nats CLI"
-    driver: "jq"
-    format_note: "JSON array at .streams[] with fields: name, subjects, retention, max_age, max_msgs, storage, replicas"
+- consumes: stream-definitions.json
+  driver: jq
+  format_note: 'JSON array at .streams[] with fields: name, subjects, retention, max_age,
+    max_msgs, storage, replicas'
+  framework: jq + nats CLI
+  task: TASK-JSTR-001
+dependencies:
+- TASK-JSTR-001
+estimated_minutes: 60
+feature_id: FEAT-JSTR
+id: TASK-JSTR-002
+implementation_mode: task-work
+parent_review: TASK-REV-E14C
+priority: high
+status: design_approved
+tags:
+- jetstream
+- provisioning
+- idempotency
+- shell
+task_type: feature
+title: Create provision-streams.sh with idempotent check/create/update
+wave: 2
 ---
 
 # Task: Create provision-streams.sh with idempotent provisioning
