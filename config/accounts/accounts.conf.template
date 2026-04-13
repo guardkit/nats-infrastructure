@@ -28,9 +28,7 @@ accounts {
     # Rich and James have full publish/subscribe access to all subjects.
     # JetStream is enabled for persistent messaging (streams, consumers).
     APPMILLA {
-        jetstream {
-            enabled
-        }
+        jetstream: enabled
         users: [
             {
                 user: "rich"
@@ -57,9 +55,7 @@ accounts {
     # Mark has publish/subscribe access scoped to finproxy.> topics only.
     # JetStream is enabled for FinProxy project streams.
     FINPROXY {
-        jetstream {
-            enabled
-        }
+        jetstream: enabled
         users: [
             {
                 user: "mark"

@@ -135,12 +135,12 @@ class TestNetworkBindings:
 
 
 class TestIncludeDirective:
-    """AC-004: Include directive references accounts/*.conf."""
+    """AC-004: Include directive references accounts config file."""
 
     def test_include_accounts_conf(self, config_text: str) -> None:
         assert re.search(
-            r'include\s+["\']?.*accounts/\*\.conf["\']?', config_text
-        ), "Must include 'accounts/*.conf' via include directive"
+            r'include\s+["\']?.*accounts/.*\.conf["\']?', config_text
+        ), "Must include accounts config via include directive"
 
 
 # --- AC-005: Config file has clear comments explaining each section ---
