@@ -17,6 +17,7 @@ Also validates TASK-JSTR-003 KV bucket provisioning:
 Also validates seam test contract from TASK-JSTR-001:
 - Seam: stream-definitions.json format contract
 """
+
 from __future__ import annotations
 
 import json
@@ -44,7 +45,9 @@ def script_text() -> str:
 @pytest.fixture
 def stream_defs() -> dict:
     """Load stream-definitions.json."""
-    assert STREAM_DEFS_FILE.exists(), f"stream-definitions.json not found at {STREAM_DEFS_FILE}"
+    assert STREAM_DEFS_FILE.exists(), (
+        f"stream-definitions.json not found at {STREAM_DEFS_FILE}"
+    )
     return json.loads(STREAM_DEFS_FILE.read_text(encoding="utf-8"))
 
 
@@ -74,9 +77,9 @@ class TestStrictErrorHandling:
     """Script uses set -euo pipefail for strict error handling."""
 
     def test_uses_set_euo_pipefail(self, script_text: str) -> None:
-        assert re.search(
-            r"set\s+-euo\s+pipefail", script_text
-        ), "Script must use 'set -euo pipefail' for strict error handling"
+        assert re.search(r"set\s+-euo\s+pipefail", script_text), (
+            "Script must use 'set -euo pipefail' for strict error handling"
+        )
 
 
 # --- Shellcheck validation ---
@@ -89,7 +92,9 @@ class TestShellcheck:
     def _require_shellcheck(self) -> None:
         """Skip tests in this class if shellcheck is not installed."""
         if shutil.which("shellcheck") is None:
-            pytest.skip("shellcheck not installed — install with: brew install shellcheck")
+            pytest.skip(
+                "shellcheck not installed — install with: brew install shellcheck"
+            )
 
     def test_script_passes_shellcheck(self) -> None:
         """provision-streams.sh must pass shellcheck with zero errors."""
@@ -122,69 +127,69 @@ class TestReadsStreamDefinitions:
 
     def test_reads_stream_definitions_json(self, script_text: str) -> None:
         """Script must reference stream-definitions.json."""
-        assert re.search(
-            r"stream-definitions\.json", script_text
-        ), "Script must reference stream-definitions.json"
+        assert re.search(r"stream-definitions\.json", script_text), (
+            "Script must reference stream-definitions.json"
+        )
 
     def test_uses_jq_to_parse(self, script_text: str) -> None:
         """Script must use jq to parse JSON."""
-        assert re.search(
-            r"\bjq\b", script_text
-        ), "Script must use jq to parse stream-definitions.json"
+        assert re.search(r"\bjq\b", script_text), (
+            "Script must use jq to parse stream-definitions.json"
+        )
 
     def test_checks_jq_available(self, script_text: str) -> None:
         """Script must check that jq is installed."""
-        assert re.search(
-            r"command\s+-v\s+jq", script_text
-        ), "Script must check jq availability with 'command -v jq'"
+        assert re.search(r"command\s+-v\s+jq", script_text), (
+            "Script must check jq availability with 'command -v jq'"
+        )
 
     def test_iterates_over_streams(self, script_text: str) -> None:
         """Script must iterate over .streams[] array."""
-        assert re.search(
-            r"\.streams\[\]", script_text
-        ), "Script must iterate over .streams[] from JSON"
+        assert re.search(r"\.streams\[\]", script_text), (
+            "Script must iterate over .streams[] from JSON"
+        )
 
     def test_extracts_stream_name(self, script_text: str) -> None:
         """Script must extract the stream name field."""
-        assert re.search(
-            r"\.name", script_text
-        ), "Script must extract .name from each stream definition"
+        assert re.search(r"\.name", script_text), (
+            "Script must extract .name from each stream definition"
+        )
 
     def test_extracts_subjects(self, script_text: str) -> None:
         """Script must extract subjects from each stream."""
-        assert re.search(
-            r"\.subjects", script_text
-        ), "Script must extract .subjects from each stream definition"
+        assert re.search(r"\.subjects", script_text), (
+            "Script must extract .subjects from each stream definition"
+        )
 
     def test_extracts_retention(self, script_text: str) -> None:
         """Script must extract retention from each stream."""
-        assert re.search(
-            r"\.retention", script_text
-        ), "Script must extract .retention from each stream definition"
+        assert re.search(r"\.retention", script_text), (
+            "Script must extract .retention from each stream definition"
+        )
 
     def test_extracts_max_age(self, script_text: str) -> None:
         """Script must extract max_age from each stream."""
-        assert re.search(
-            r"\.max_age", script_text
-        ), "Script must extract .max_age from each stream definition"
+        assert re.search(r"\.max_age", script_text), (
+            "Script must extract .max_age from each stream definition"
+        )
 
     def test_extracts_max_msgs(self, script_text: str) -> None:
         """Script must extract max_msgs from each stream."""
-        assert re.search(
-            r"\.max_msgs", script_text
-        ), "Script must extract .max_msgs from each stream definition"
+        assert re.search(r"\.max_msgs", script_text), (
+            "Script must extract .max_msgs from each stream definition"
+        )
 
     def test_extracts_storage(self, script_text: str) -> None:
         """Script must extract storage from each stream."""
-        assert re.search(
-            r"\.storage", script_text
-        ), "Script must extract .storage from each stream definition"
+        assert re.search(r"\.storage", script_text), (
+            "Script must extract .storage from each stream definition"
+        )
 
     def test_extracts_replicas(self, script_text: str) -> None:
         """Script must extract replicas from each stream."""
-        assert re.search(
-            r"\.replicas", script_text
-        ), "Script must extract .replicas from each stream definition"
+        assert re.search(r"\.replicas", script_text), (
+            "Script must extract .replicas from each stream definition"
+        )
 
 
 # --- AC-002: First run creates all 7 streams successfully ---
@@ -195,27 +200,27 @@ class TestStreamCreation:
 
     def test_uses_nats_stream_add(self, script_text: str) -> None:
         """Script must use 'nats stream add' for creation."""
-        assert re.search(
-            r"nats\s+stream\s+add", script_text
-        ), "Script must use 'nats stream add' to create streams"
+        assert re.search(r"nats\s+stream\s+add", script_text), (
+            "Script must use 'nats stream add' to create streams"
+        )
 
     def test_uses_defaults_flag(self, script_text: str) -> None:
         """Script must use --defaults flag for non-interactive creation."""
-        assert re.search(
-            r"--defaults", script_text
-        ), "Script must use --defaults flag for non-interactive stream add"
+        assert re.search(r"--defaults", script_text), (
+            "Script must use --defaults flag for non-interactive stream add"
+        )
 
     def test_logs_create_action(self, script_text: str) -> None:
         """Script must log [CREATE] when creating a new stream."""
-        assert re.search(
-            r"\[CREATE\]", script_text
-        ), "Script must log [CREATE] prefix when creating a stream"
+        assert re.search(r"\[CREATE\]", script_text), (
+            "Script must log [CREATE] prefix when creating a stream"
+        )
 
     def test_checks_stream_existence_before_create(self, script_text: str) -> None:
         """Script must check if stream exists with 'nats stream info'."""
-        assert re.search(
-            r"nats\s+stream\s+info", script_text
-        ), "Script must check stream existence with 'nats stream info'"
+        assert re.search(r"nats\s+stream\s+info", script_text), (
+            "Script must check stream existence with 'nats stream info'"
+        )
 
 
 # --- AC-003: Second run detects existing streams ---
@@ -226,15 +231,15 @@ class TestIdempotencyDetection:
 
     def test_logs_ok_for_current_streams(self, script_text: str) -> None:
         """Script must log [OK] when a stream is already current."""
-        assert re.search(
-            r"\[OK\]", script_text
-        ), "Script must log [OK] for streams that are already up to date"
+        assert re.search(r"\[OK\]", script_text), (
+            "Script must log [OK] for streams that are already up to date"
+        )
 
     def test_logs_update_for_changed_streams(self, script_text: str) -> None:
         """Script must log [UPDATE] when updating an existing stream."""
-        assert re.search(
-            r"\[UPDATE\]", script_text
-        ), "Script must log [UPDATE] when updating a stream"
+        assert re.search(r"\[UPDATE\]", script_text), (
+            "Script must log [UPDATE] when updating a stream"
+        )
 
 
 # --- AC-004: Changing a value propagates via [UPDATE] ---
@@ -245,21 +250,21 @@ class TestStreamUpdate:
 
     def test_uses_nats_stream_update(self, script_text: str) -> None:
         """Script must use 'nats stream update' for modifications."""
-        assert re.search(
-            r"nats\s+stream\s+update", script_text
-        ), "Script must use 'nats stream update' to update existing streams"
+        assert re.search(r"nats\s+stream\s+update", script_text), (
+            "Script must use 'nats stream update' to update existing streams"
+        )
 
     def test_uses_force_flag(self, script_text: str) -> None:
         """Script must use --force flag to bypass interactive confirmation."""
-        assert re.search(
-            r"--force", script_text
-        ), "Script must use --force flag for non-interactive stream update"
+        assert re.search(r"--force", script_text), (
+            "Script must use --force flag for non-interactive stream update"
+        )
 
     def test_logs_error_on_update_failure(self, script_text: str) -> None:
         """Script must log [ERROR] when an update fails."""
-        assert re.search(
-            r"\[ERROR\]", script_text
-        ), "Script must log [ERROR] when stream update fails"
+        assert re.search(r"\[ERROR\]", script_text), (
+            "Script must log [ERROR] when stream update fails"
+        )
 
 
 # --- AC-005: --dry-run flag ---
@@ -270,9 +275,9 @@ class TestDryRunFlag:
 
     def test_supports_dry_run_flag(self, script_text: str) -> None:
         """Script must accept --dry-run flag."""
-        assert re.search(
-            r"--dry-run", script_text
-        ), "Script must support --dry-run flag"
+        assert re.search(r"--dry-run", script_text), (
+            "Script must support --dry-run flag"
+        )
 
     def test_dry_run_prevents_modification(self, script_text: str) -> None:
         """Script must check dry-run before executing nats commands."""
@@ -287,7 +292,9 @@ class TestDryRunFlag:
 
     def test_dry_run_shows_would_actions(self, script_text: str) -> None:
         """Script should indicate what would happen during dry-run."""
-        has_would = re.search(r"(would|DRY.RUN|dry.run|DRYRUN)", script_text, re.IGNORECASE)
+        has_would = re.search(
+            r"(would|DRY.RUN|dry.run|DRYRUN)", script_text, re.IGNORECASE
+        )
         assert has_would, (
             "Script must indicate planned actions in dry-run mode (e.g., 'would create')"
         )
@@ -306,15 +313,17 @@ class TestExitCodeBehavior:
 
     def test_has_exit_nonzero_on_fatal(self, script_text: str) -> None:
         """Script must exit non-zero on fatal errors."""
-        assert re.search(
-            r"exit\s+[1-9]", script_text
-        ), "Script must exit non-zero on fatal errors"
+        assert re.search(r"exit\s+[1-9]", script_text), (
+            "Script must exit non-zero on fatal errors"
+        )
 
     def test_continues_after_nonfatal_errors(self, script_text: str) -> None:
         """Script must continue to next stream after non-fatal error."""
         # Look for continue pattern in loop or error counting
         has_continue = re.search(r"\bcontinue\b", script_text)
-        has_error_count = re.search(r"(errors|error_count|err_count)", script_text, re.IGNORECASE)
+        has_error_count = re.search(
+            r"(errors|error_count|err_count)", script_text, re.IGNORECASE
+        )
         assert has_continue or has_error_count, (
             "Script must handle non-fatal errors gracefully (continue or error counting)"
         )
@@ -328,21 +337,21 @@ class TestNatsConnectionConfig:
 
     def test_supports_nats_url_env_var(self, script_text: str) -> None:
         """Script must support NATS_URL environment variable."""
-        assert re.search(
-            r"NATS_URL", script_text
-        ), "Script must support NATS_URL environment variable"
+        assert re.search(r"NATS_URL", script_text), (
+            "Script must support NATS_URL environment variable"
+        )
 
     def test_nats_url_default_localhost(self, script_text: str) -> None:
         """Script must default NATS_URL to nats://localhost:4222."""
-        assert re.search(
-            r"nats://localhost:4222", script_text
-        ), "Script must default NATS_URL to nats://localhost:4222"
+        assert re.search(r"nats://localhost:4222", script_text), (
+            "Script must default NATS_URL to nats://localhost:4222"
+        )
 
     def test_supports_nats_creds_env_var(self, script_text: str) -> None:
         """Script must support NATS_CREDS environment variable."""
-        assert re.search(
-            r"NATS_CREDS", script_text
-        ), "Script must support NATS_CREDS environment variable for credentials"
+        assert re.search(r"NATS_CREDS", script_text), (
+            "Script must support NATS_CREDS environment variable for credentials"
+        )
 
     def test_nats_creds_is_optional(self, script_text: str) -> None:
         """NATS_CREDS must be optional (script works without it)."""
@@ -350,9 +359,7 @@ class TestNatsConnectionConfig:
         has_optional_check = re.search(
             r"NATS_CREDS.*:-|if\s+.*NATS_CREDS|-n\s+.*NATS_CREDS|--creds", script_text
         )
-        assert has_optional_check, (
-            "NATS_CREDS must be optional — use conditional logic"
-        )
+        assert has_optional_check, "NATS_CREDS must be optional — use conditional logic"
 
 
 # --- Health check / wait for NATS ---
@@ -367,9 +374,7 @@ class TestNatsHealthCheck:
         has_health_loop = re.search(
             r"(wait|health|ready|retry|attempt)", script_text, re.IGNORECASE
         )
-        assert has_health_loop, (
-            "Script must wait for NATS health before provisioning"
-        )
+        assert has_health_loop, "Script must wait for NATS health before provisioning"
 
     def test_has_retry_mechanism(self, script_text: str) -> None:
         """Script must have a retry/wait loop for NATS connectivity."""
@@ -422,7 +427,9 @@ class TestSummaryOutput:
         """Script must print a summary line with counts."""
         assert re.search(
             r"(created.*updated.*current.*error|summary)", script_text, re.IGNORECASE
-        ), "Script must print a summary with created, updated, current, and error counts"
+        ), (
+            "Script must print a summary with created, updated, current, and error counts"
+        )
 
 
 # --- Log format ---
@@ -434,16 +441,14 @@ class TestLogFormat:
     def test_all_log_prefixes_present(self, script_text: str) -> None:
         """Script must use all four log prefixes."""
         for prefix in ["[CREATE]", "[UPDATE]", "[OK]", "[ERROR]"]:
-            assert re.search(
-                re.escape(prefix), script_text
-            ), f"Script must use {prefix} log prefix"
+            assert re.search(re.escape(prefix), script_text), (
+                f"Script must use {prefix} log prefix"
+            )
 
     def test_log_prefix_includes_stream_name(self, script_text: str) -> None:
         """Log lines should include the stream name after the prefix."""
         # At least one log line should include a variable reference after the prefix
-        has_name_in_log = re.search(
-            r"\[(CREATE|UPDATE|OK|ERROR)\].*\$", script_text
-        )
+        has_name_in_log = re.search(r"\[(CREATE|UPDATE|OK|ERROR)\].*\$", script_text)
         assert has_name_in_log, (
             "Log prefixes must be followed by the stream name (via variable)"
         )
@@ -467,8 +472,13 @@ class TestStreamDefinitionsContract:
 
     def test_all_streams_have_required_fields(self, stream_defs: dict) -> None:
         required_fields = {
-            "name", "subjects", "retention", "max_age",
-            "max_msgs", "storage", "replicas",
+            "name",
+            "subjects",
+            "retention",
+            "max_age",
+            "max_msgs",
+            "storage",
+            "replicas",
         }
         for stream in stream_defs["streams"]:
             missing = required_fields - set(stream.keys())
@@ -496,45 +506,45 @@ class TestKvBucketProvisioning:
 
     def test_uses_nats_kv_add(self, script_text: str) -> None:
         """Script must use 'nats kv add' for creating KV buckets."""
-        assert re.search(
-            r"nats\s+kv\s+add", script_text
-        ), "Script must use 'nats kv add' to create KV buckets"
+        assert re.search(r"nats\s+kv\s+add", script_text), (
+            "Script must use 'nats kv add' to create KV buckets"
+        )
 
     def test_uses_nats_kv_info(self, script_text: str) -> None:
         """Script must use 'nats kv info' to check KV bucket existence."""
-        assert re.search(
-            r"nats\s+kv\s+info", script_text
-        ), "Script must use 'nats kv info' to check KV bucket existence"
+        assert re.search(r"nats\s+kv\s+info", script_text), (
+            "Script must use 'nats kv info' to check KV bucket existence"
+        )
 
     def test_uses_nats_kv_update(self, script_text: str) -> None:
         """Script must use 'nats kv update' for updating existing KV buckets."""
-        assert re.search(
-            r"nats\s+kv\s+update", script_text
-        ), "Script must use 'nats kv update' to update existing KV buckets"
+        assert re.search(r"nats\s+kv\s+update", script_text), (
+            "Script must use 'nats kv update' to update existing KV buckets"
+        )
 
     def test_reads_kv_buckets_from_json(self, script_text: str) -> None:
         """Script must read .kv_buckets[] from JSON definitions."""
-        assert re.search(
-            r"\.kv_buckets", script_text
-        ), "Script must read .kv_buckets from stream-definitions.json"
+        assert re.search(r"\.kv_buckets", script_text), (
+            "Script must read .kv_buckets from stream-definitions.json"
+        )
 
     def test_extracts_kv_bucket_name(self, script_text: str) -> None:
         """Script must extract the name field from KV bucket definitions."""
-        assert re.search(
-            r"kv_buckets\[.*\]\.name", script_text
-        ), "Script must extract .name from each KV bucket definition"
+        assert re.search(r"kv_buckets\[.*\]\.name", script_text), (
+            "Script must extract .name from each KV bucket definition"
+        )
 
     def test_extracts_kv_bucket_ttl(self, script_text: str) -> None:
         """Script must extract the ttl field from KV bucket definitions."""
-        assert re.search(
-            r"kv_buckets\[.*\]\.ttl", script_text
-        ), "Script must extract .ttl from each KV bucket definition"
+        assert re.search(r"kv_buckets\[.*\]\.ttl", script_text), (
+            "Script must extract .ttl from each KV bucket definition"
+        )
 
     def test_has_provision_kv_bucket_function(self, script_text: str) -> None:
         """Script must have a provision_kv_bucket function."""
-        assert re.search(
-            r"provision_kv_bucket\(\)", script_text
-        ), "Script must define a provision_kv_bucket() function"
+        assert re.search(r"provision_kv_bucket\(\)", script_text), (
+            "Script must define a provision_kv_bucket() function"
+        )
 
     def test_kv_bucket_section_after_streams(self, script_text: str) -> None:
         """KV bucket provisioning must appear after stream provisioning in main()."""
@@ -555,39 +565,39 @@ class TestKvBucketIdempotency:
 
     def test_checks_kv_existence_before_create(self, script_text: str) -> None:
         """Script must check if KV bucket exists before creating."""
-        assert re.search(
-            r"nats\s+kv\s+info", script_text
-        ), "Script must check KV bucket existence with 'nats kv info'"
+        assert re.search(r"nats\s+kv\s+info", script_text), (
+            "Script must check KV bucket existence with 'nats kv info'"
+        )
 
     def test_logs_kv_create_action(self, script_text: str) -> None:
         """Script must log [CREATE] when creating a new KV bucket."""
-        assert re.search(
-            r"\[CREATE\].*KV", script_text
-        ), "Script must log [CREATE] KV prefix when creating a KV bucket"
+        assert re.search(r"\[CREATE\].*KV", script_text), (
+            "Script must log [CREATE] KV prefix when creating a KV bucket"
+        )
 
     def test_logs_kv_ok_action(self, script_text: str) -> None:
         """Script must log [OK] when KV bucket already exists and is current."""
-        assert re.search(
-            r"\[OK\].*KV", script_text
-        ), "Script must log [OK] KV for existing buckets that are current"
+        assert re.search(r"\[OK\].*KV", script_text), (
+            "Script must log [OK] KV for existing buckets that are current"
+        )
 
     def test_logs_kv_update_action(self, script_text: str) -> None:
         """Script must log [UPDATE] when updating a KV bucket."""
-        assert re.search(
-            r"\[UPDATE\].*KV", script_text
-        ), "Script must log [UPDATE] KV when updating a bucket"
+        assert re.search(r"\[UPDATE\].*KV", script_text), (
+            "Script must log [UPDATE] KV when updating a bucket"
+        )
 
     def test_logs_kv_error_action(self, script_text: str) -> None:
         """Script must log [ERROR] when KV bucket operation fails."""
-        assert re.search(
-            r"\[ERROR\].*KV", script_text
-        ), "Script must log [ERROR] KV when bucket operation fails"
+        assert re.search(r"\[ERROR\].*KV", script_text), (
+            "Script must log [ERROR] KV when bucket operation fails"
+        )
 
     def test_kv_dry_run_support(self, script_text: str) -> None:
         """Script must support dry-run mode for KV bucket operations."""
-        assert re.search(
-            r"\[DRY-RUN\].*KV", script_text
-        ), "Script must support [DRY-RUN] mode for KV bucket operations"
+        assert re.search(r"\[DRY-RUN\].*KV", script_text), (
+            "Script must support [DRY-RUN] mode for KV bucket operations"
+        )
 
 
 # --- AC-004: TTL values applied correctly ---
@@ -598,22 +608,22 @@ class TestKvBucketTtlProvisioning:
 
     def test_supports_ttl_flag(self, script_text: str) -> None:
         """Script must support --ttl flag for KV bucket creation."""
-        assert re.search(
-            r"--ttl", script_text
-        ), "Script must use --ttl flag for KV buckets with TTL"
+        assert re.search(r"--ttl", script_text), (
+            "Script must use --ttl flag for KV buckets with TTL"
+        )
 
     def test_handles_null_ttl(self, script_text: str) -> None:
         """Script must handle null/empty TTL (persistent buckets)."""
-        assert re.search(
-            r'(null|"null"|empty)', script_text
-        ), "Script must handle null TTL values for persistent buckets"
+        assert re.search(r'(null|"null"|empty)', script_text), (
+            "Script must handle null TTL values for persistent buckets"
+        )
 
     def test_ttl_is_conditional(self, script_text: str) -> None:
         """TTL flag must only be applied when TTL is non-null."""
         # Look for conditional TTL application
-        assert re.search(
-            r"ttl_opts", script_text
-        ), "Script must conditionally apply TTL flags"
+        assert re.search(r"ttl_opts", script_text), (
+            "Script must conditionally apply TTL flags"
+        )
 
 
 # --- KV bucket summary ---
@@ -624,30 +634,28 @@ class TestKvBucketSummary:
 
     def test_tracks_kv_created_count(self, script_text: str) -> None:
         """Script must track count of created KV buckets."""
-        assert re.search(
-            r"kv_created", script_text
-        ), "Script must track kv_created count"
+        assert re.search(r"kv_created", script_text), (
+            "Script must track kv_created count"
+        )
 
     def test_tracks_kv_updated_count(self, script_text: str) -> None:
         """Script must track count of updated KV buckets."""
-        assert re.search(
-            r"kv_updated", script_text
-        ), "Script must track kv_updated count"
+        assert re.search(r"kv_updated", script_text), (
+            "Script must track kv_updated count"
+        )
 
     def test_tracks_kv_current_count(self, script_text: str) -> None:
         """Script must track count of already-current KV buckets."""
-        assert re.search(
-            r"kv_current", script_text
-        ), "Script must track kv_current count"
+        assert re.search(r"kv_current", script_text), (
+            "Script must track kv_current count"
+        )
 
     def test_tracks_kv_error_count(self, script_text: str) -> None:
         """Script must track count of KV bucket errors."""
-        assert re.search(
-            r"kv_errors", script_text
-        ), "Script must track kv_errors count"
+        assert re.search(r"kv_errors", script_text), "Script must track kv_errors count"
 
     def test_prints_kv_summary_line(self, script_text: str) -> None:
         """Script must print a KV bucket summary line."""
-        assert re.search(
-            r"KV Bucket", script_text
-        ), "Script must print a KV Buckets summary line"
+        assert re.search(r"KV Bucket", script_text), (
+            "Script must print a KV Buckets summary line"
+        )

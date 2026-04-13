@@ -12,6 +12,7 @@ Also verifies TASK-JSTR-003 KV bucket definitions:
 - AC-001: All 4 KV buckets defined in stream-definitions.json
 - AC-003: TTL values applied correctly (null = no TTL, persistent)
 """
+
 from __future__ import annotations
 
 import json
@@ -25,7 +26,15 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 STREAM_DEFS_FILE = PROJECT_ROOT / "streams" / "stream-definitions.json"
 
 # Required fields for each stream definition
-REQUIRED_FIELDS = {"name", "subjects", "retention", "max_age", "max_msgs", "storage", "replicas"}
+REQUIRED_FIELDS = {
+    "name",
+    "subjects",
+    "retention",
+    "max_age",
+    "max_msgs",
+    "storage",
+    "replicas",
+}
 
 # Valid retention values in NATS CLI format
 VALID_RETENTION_VALUES = {"work", "limits"}
@@ -112,7 +121,9 @@ EXPECTED_CORE_STREAMS = {
 @pytest.fixture
 def stream_defs_text() -> str:
     """Read the stream-definitions.json file content."""
-    assert STREAM_DEFS_FILE.exists(), f"stream-definitions.json not found at {STREAM_DEFS_FILE}"
+    assert STREAM_DEFS_FILE.exists(), (
+        f"stream-definitions.json not found at {STREAM_DEFS_FILE}"
+    )
     return STREAM_DEFS_FILE.read_text(encoding="utf-8")
 
 
@@ -157,9 +168,7 @@ class TestStreamDefsFileExists:
 
     def test_file_in_streams_directory(self) -> None:
         streams_dir = PROJECT_ROOT / "streams"
-        assert streams_dir.is_dir(), (
-            f"Expected 'streams' directory at {streams_dir}"
-        )
+        assert streams_dir.is_dir(), f"Expected 'streams' directory at {streams_dir}"
 
 
 # --- AC-005: JSON is valid (parseable) ---
@@ -181,9 +190,7 @@ class TestJsonValidity:
         )
 
     def test_streams_is_array(self, stream_defs: dict) -> None:
-        assert isinstance(stream_defs["streams"], list), (
-            "'streams' must be an array"
-        )
+        assert isinstance(stream_defs["streams"], list), "'streams' must be an array"
 
 
 # --- AC-004: All required fields present ---
@@ -262,13 +269,17 @@ class TestRetentionValues:
 class TestCoreStreams:
     """AC-002: All 6 core streams defined with exact spec values."""
 
-    def test_all_six_core_streams_present(self, streams_by_name: dict[str, dict]) -> None:
+    def test_all_six_core_streams_present(
+        self, streams_by_name: dict[str, dict]
+    ) -> None:
         for stream_name in EXPECTED_CORE_STREAMS:
             assert stream_name in streams_by_name, (
                 f"Core stream '{stream_name}' not found in definitions"
             )
 
-    def test_core_streams_have_core_scope(self, streams_by_name: dict[str, dict]) -> None:
+    def test_core_streams_have_core_scope(
+        self, streams_by_name: dict[str, dict]
+    ) -> None:
         for stream_name in EXPECTED_CORE_STREAMS:
             stream = streams_by_name[stream_name]
             assert stream.get("scope") == "core", (
@@ -276,7 +287,9 @@ class TestCoreStreams:
             )
 
     @pytest.mark.parametrize("stream_name", list(EXPECTED_CORE_STREAMS.keys()))
-    def test_core_stream_subjects(self, streams_by_name: dict[str, dict], stream_name: str) -> None:
+    def test_core_stream_subjects(
+        self, streams_by_name: dict[str, dict], stream_name: str
+    ) -> None:
         expected = EXPECTED_CORE_STREAMS[stream_name]
         actual = streams_by_name[stream_name]
         assert actual["subjects"] == expected["subjects"], (
@@ -285,7 +298,9 @@ class TestCoreStreams:
         )
 
     @pytest.mark.parametrize("stream_name", list(EXPECTED_CORE_STREAMS.keys()))
-    def test_core_stream_retention(self, streams_by_name: dict[str, dict], stream_name: str) -> None:
+    def test_core_stream_retention(
+        self, streams_by_name: dict[str, dict], stream_name: str
+    ) -> None:
         expected = EXPECTED_CORE_STREAMS[stream_name]
         actual = streams_by_name[stream_name]
         assert actual["retention"] == expected["retention"], (
@@ -294,7 +309,9 @@ class TestCoreStreams:
         )
 
     @pytest.mark.parametrize("stream_name", list(EXPECTED_CORE_STREAMS.keys()))
-    def test_core_stream_max_age(self, streams_by_name: dict[str, dict], stream_name: str) -> None:
+    def test_core_stream_max_age(
+        self, streams_by_name: dict[str, dict], stream_name: str
+    ) -> None:
         expected = EXPECTED_CORE_STREAMS[stream_name]
         actual = streams_by_name[stream_name]
         assert actual["max_age"] == expected["max_age"], (
@@ -303,7 +320,9 @@ class TestCoreStreams:
         )
 
     @pytest.mark.parametrize("stream_name", list(EXPECTED_CORE_STREAMS.keys()))
-    def test_core_stream_max_msgs(self, streams_by_name: dict[str, dict], stream_name: str) -> None:
+    def test_core_stream_max_msgs(
+        self, streams_by_name: dict[str, dict], stream_name: str
+    ) -> None:
         expected = EXPECTED_CORE_STREAMS[stream_name]
         actual = streams_by_name[stream_name]
         assert actual["max_msgs"] == expected["max_msgs"], (
@@ -312,7 +331,9 @@ class TestCoreStreams:
         )
 
     @pytest.mark.parametrize("stream_name", list(EXPECTED_CORE_STREAMS.keys()))
-    def test_core_stream_storage(self, streams_by_name: dict[str, dict], stream_name: str) -> None:
+    def test_core_stream_storage(
+        self, streams_by_name: dict[str, dict], stream_name: str
+    ) -> None:
         expected = EXPECTED_CORE_STREAMS[stream_name]
         actual = streams_by_name[stream_name]
         assert actual["storage"] == expected["storage"], (
@@ -321,7 +342,9 @@ class TestCoreStreams:
         )
 
     @pytest.mark.parametrize("stream_name", list(EXPECTED_CORE_STREAMS.keys()))
-    def test_core_stream_replicas(self, streams_by_name: dict[str, dict], stream_name: str) -> None:
+    def test_core_stream_replicas(
+        self, streams_by_name: dict[str, dict], stream_name: str
+    ) -> None:
         expected = EXPECTED_CORE_STREAMS[stream_name]
         actual = streams_by_name[stream_name]
         assert actual["replicas"] == expected["replicas"], (
@@ -337,9 +360,7 @@ class TestFinproxyStream:
     """AC-003: FINPROXY project stream included with scope=project and reasonable defaults (24h, 5000)."""
 
     def test_finproxy_stream_exists(self, streams_by_name: dict[str, dict]) -> None:
-        assert "FINPROXY" in streams_by_name, (
-            "FINPROXY stream not found in definitions"
-        )
+        assert "FINPROXY" in streams_by_name, "FINPROXY stream not found in definitions"
 
     def test_finproxy_scope_is_project(self, streams_by_name: dict[str, dict]) -> None:
         finproxy = streams_by_name["FINPROXY"]
@@ -502,9 +523,7 @@ class TestStreamCount:
 
     def test_no_duplicate_stream_names(self, streams_list: list[dict]) -> None:
         names = [s["name"] for s in streams_list]
-        assert len(names) == len(set(names)), (
-            f"Duplicate stream names found: {names}"
-        )
+        assert len(names) == len(set(names)), f"Duplicate stream names found: {names}"
 
     def test_no_duplicate_subjects(self, streams_list: list[dict]) -> None:
         all_subjects = []
@@ -523,7 +542,9 @@ class TestStreamCount:
 @pytest.fixture
 def kv_buckets_list(stream_defs: dict) -> list[dict]:
     """Extract the kv_buckets array from the definitions."""
-    assert "kv_buckets" in stream_defs, "stream-definitions.json must have a 'kv_buckets' key"
+    assert "kv_buckets" in stream_defs, (
+        "stream-definitions.json must have a 'kv_buckets' key"
+    )
     kv_buckets = stream_defs["kv_buckets"]
     assert isinstance(kv_buckets, list), "'kv_buckets' must be a JSON array"
     return kv_buckets
@@ -556,7 +577,9 @@ class TestKvBucketsExist:
             f"Expected 4 KV buckets, got {len(kv_buckets_list)}"
         )
 
-    def test_all_expected_buckets_present(self, kv_buckets_by_name: dict[str, dict]) -> None:
+    def test_all_expected_buckets_present(
+        self, kv_buckets_by_name: dict[str, dict]
+    ) -> None:
         for bucket_name in EXPECTED_KV_BUCKETS:
             assert bucket_name in kv_buckets_by_name, (
                 f"KV bucket '{bucket_name}' not found in definitions"
@@ -575,7 +598,9 @@ class TestKvBucketsExist:
 class TestKvBucketRequiredFields:
     """All KV buckets must have required fields: name, ttl, description."""
 
-    def test_all_buckets_have_required_fields(self, kv_buckets_list: list[dict]) -> None:
+    def test_all_buckets_have_required_fields(
+        self, kv_buckets_list: list[dict]
+    ) -> None:
         for bucket in kv_buckets_list:
             bucket_name = bucket.get("name", "<unnamed>")
             missing = KV_REQUIRED_FIELDS - set(bucket.keys())
@@ -634,22 +659,30 @@ class TestKvBucketTtlValues:
             f"expected {expected['ttl']!r}, got {actual['ttl']!r}"
         )
 
-    def test_agent_status_is_persistent(self, kv_buckets_by_name: dict[str, dict]) -> None:
+    def test_agent_status_is_persistent(
+        self, kv_buckets_by_name: dict[str, dict]
+    ) -> None:
         assert kv_buckets_by_name["agent-status"]["ttl"] is None, (
             "agent-status must have null TTL (persistent)"
         )
 
-    def test_agent_registry_is_persistent(self, kv_buckets_by_name: dict[str, dict]) -> None:
+    def test_agent_registry_is_persistent(
+        self, kv_buckets_by_name: dict[str, dict]
+    ) -> None:
         assert kv_buckets_by_name["agent-registry"]["ttl"] is None, (
             "agent-registry must have null TTL (persistent)"
         )
 
-    def test_pipeline_state_ttl_is_7d(self, kv_buckets_by_name: dict[str, dict]) -> None:
+    def test_pipeline_state_ttl_is_7d(
+        self, kv_buckets_by_name: dict[str, dict]
+    ) -> None:
         assert kv_buckets_by_name["pipeline-state"]["ttl"] == "7d", (
             f"pipeline-state TTL must be '7d', got '{kv_buckets_by_name['pipeline-state']['ttl']}'"
         )
 
-    def test_jarvis_session_ttl_is_1h(self, kv_buckets_by_name: dict[str, dict]) -> None:
+    def test_jarvis_session_ttl_is_1h(
+        self, kv_buckets_by_name: dict[str, dict]
+    ) -> None:
         assert kv_buckets_by_name["jarvis-session"]["ttl"] == "1h", (
             f"jarvis-session TTL must be '1h', got '{kv_buckets_by_name['jarvis-session']['ttl']}'"
         )
@@ -686,10 +719,14 @@ class TestKvBucketsContract:
             f"Expected at least 4 KV buckets, got {len(kv_buckets_list)}"
         )
 
-    def test_all_buckets_have_required_fields(self, kv_buckets_list: list[dict]) -> None:
+    def test_all_buckets_have_required_fields(
+        self, kv_buckets_list: list[dict]
+    ) -> None:
         for bucket in kv_buckets_list:
-            assert "name" in bucket, f"KV bucket missing 'name' field"
-            assert "ttl" in bucket, f"KV bucket '{bucket.get('name', '?')}' missing 'ttl' field"
+            assert "name" in bucket, "KV bucket missing 'name' field"
+            assert "ttl" in bucket, (
+                f"KV bucket '{bucket.get('name', '?')}' missing 'ttl' field"
+            )
             assert "description" in bucket, (
                 f"KV bucket '{bucket.get('name', '?')}' missing 'description' field"
             )
