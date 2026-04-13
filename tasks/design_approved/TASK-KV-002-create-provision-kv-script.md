@@ -1,16 +1,16 @@
 ---
-id: TASK-KV-002
-title: "Create provision-kv.sh with idempotent KV bucket provisioning"
-task_type: feature
-parent_review: TASK-REV-4721
-feature_id: FEAT-KV
-wave: 2
-implementation_mode: task-work
 complexity: 4
 dependencies:
-  - TASK-KV-001
-status: pending
+- TASK-KV-001
 estimated_minutes: 45
+feature_id: FEAT-KV
+id: TASK-KV-002
+implementation_mode: task-work
+parent_review: TASK-REV-4721
+status: design_approved
+task_type: feature
+title: Create provision-kv.sh with idempotent KV bucket provisioning
+wave: 2
 ---
 
 # Task: Create provision-kv.sh with idempotent KV bucket provisioning
