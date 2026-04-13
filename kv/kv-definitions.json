@@ -1,0 +1,40 @@
+{
+  "kv_buckets": [
+    {
+      "name": "agent-status",
+      "ttl": "",
+      "storage": "file",
+      "history": 1,
+      "max_value_size": "64KB",
+      "replicas": 1,
+      "description": "Last known status per agent — replaces polling"
+    },
+    {
+      "name": "agent-registry",
+      "ttl": "",
+      "storage": "file",
+      "history": 5,
+      "max_value_size": "256KB",
+      "replicas": 1,
+      "description": "Fleet routing table — agent capability manifests, used by Jarvis for routing"
+    },
+    {
+      "name": "pipeline-state",
+      "ttl": "7d",
+      "storage": "file",
+      "history": 3,
+      "max_value_size": "64KB",
+      "replicas": 1,
+      "description": "Current pipeline state per feature_id"
+    },
+    {
+      "name": "jarvis-session",
+      "ttl": "1h",
+      "storage": "memory",
+      "history": 1,
+      "max_value_size": "128KB",
+      "replicas": 1,
+      "description": "Jarvis conversation session context"
+    }
+  ]
+}
