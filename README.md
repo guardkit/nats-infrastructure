@@ -66,15 +66,19 @@ FINPROXY NATS account (Mark), enforced at the account permission level.
 JetStream KV buckets provide key-value storage backed by streams. They are defined in
 the `kv_buckets` array of `stream-definitions.json` and provisioned alongside streams.
 
-| Bucket | TTL | Description |
-|--------|-----|-------------|
-| agent-status | — | Last known status per agent — replaces polling |
-| agent-registry | — | Fleet routing table — agent capability manifests, used by Jarvis for routing |
-| pipeline-state | 7d | Current pipeline state per feature_id |
-| jarvis-session | 1h | Jarvis conversation session context |
+| Bucket | TTL | Storage | History | Description |
+|--------|-----|---------|---------|-------------|
+| agent-status | — | file | 1 | Last known status per agent — replaces polling |
+| agent-registry | — | file | 5 | Fleet routing table — agent capability manifests, used by Jarvis for routing |
+| pipeline-state | 7d | file | 3 | Current pipeline state per feature_id |
+| jarvis-session | 1h | memory | 1 | Jarvis conversation session context |
 
 Buckets with no TTL (`null`) are persistent — keys remain until explicitly deleted.
-Buckets with a TTL automatically expire keys after the specified duration.
+Buckets with a TTL automatically expire keys after the specified duration. Memory-backed
+buckets (`jarvis-session`) do not survive server restarts.
+
+For detailed KV usage patterns, CLI examples, watch patterns, and agent interaction
+documentation, see [`docs/kv-usage.md`](docs/kv-usage.md).
 
 ### Provisioning Commands
 
@@ -264,6 +268,7 @@ docker run --rm \
 
 ## Docs
 
+- `docs/kv-usage.md` — KV store usage patterns, CLI examples, and agent interaction documentation
 - `docs/design/specs/nats-infrastructure-system-spec.md` — Full spec
 - `docs/design/decisions/ADR-001-standalone-infra-repo.md` — Why standalone, not co-located
 - `docs/design/decisions/ADR-002-account-multi-tenancy.md` — NATS accounts for project isolation

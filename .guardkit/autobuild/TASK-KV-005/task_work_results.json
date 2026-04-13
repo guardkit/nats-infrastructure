@@ -1,0 +1,132 @@
+{
+  "task_id": "TASK-KV-005",
+  "timestamp": "2026-04-13T23:01:41.732794",
+  "completed": true,
+  "success": true,
+  "implementation_mode": "direct",
+  "phases": {
+    "phase_3": {
+      "detected": true,
+      "completed": true
+    }
+  },
+  "quality_gates": {
+    "tests_passing": true,
+    "tests_passed": 1,
+    "tests_failed": 0,
+    "coverage": null,
+    "coverage_met": true,
+    "quality_gates_relaxed": true,
+    "all_passed": true
+  },
+  "files_modified": [],
+  "files_created": [
+    "tests/test_kv_watch_integration.py"
+  ],
+  "tests_written": [
+    "tests/test_kv_watch_integration.py"
+  ],
+  "requirements_addressed": [
+    "AC-001: Verify all 4 KV buckets created by provision-kv.sh",
+    "AC-002: Put/get roundtrip on agent-status",
+    "AC-003: Watch agent-status receives live updates",
+    "AC-004: agent-registry history depth (6 puts, only 5 retained)",
+    "AC-005: jarvis-session TTL expiry",
+    "AC-006: pipeline-state persists across broker restart",
+    "AC-007: provision-kv.sh --dry-run produces expected output",
+    "AC-008: All tests pass against Docker Compose NATS instance"
+  ],
+  "requirements_met": [
+    "AC-001: Verify all 4 KV buckets created by provision-kv.sh",
+    "AC-002: Put/get roundtrip on agent-status",
+    "AC-003: Watch agent-status receives live updates",
+    "AC-004: agent-registry history depth (6 puts, only 5 retained)",
+    "AC-005: jarvis-session TTL expiry",
+    "AC-006: pipeline-state persists across broker restart",
+    "AC-007: provision-kv.sh --dry-run produces expected output",
+    "AC-008: All tests pass against Docker Compose NATS instance"
+  ],
+  "summary": "Direct mode implementation completed successfully",
+  "completion_promises": [
+    {
+      "criterion_id": "AC-001",
+      "criterion_text": "[ ] Test script verifies all 4 KV buckets are created by provision-kv.sh",
+      "status": "complete",
+      "evidence": "TestKvBucketsCreated class with 9 tests: test_provision_script_creates_all_buckets runs 'nats kv ls' and verifies all 4 bucket names present; test_bucket_info_accessible parametrized over all 4 buckets; test_agent_status_storage_is_file, test_agent_registry_history_is_5, test_jarvis_session_storage_is_memory, test_pipeline_state_storage_is_file verify per-bucket configuration. Module-level fixture runs provision-kv.sh at test start.",
+      "test_file": "tests/test_kv_watch_integration.py",
+      "implementation_files": [
+        "tests/test_kv_watch_integration.py"
+      ]
+    },
+    {
+      "criterion_id": "AC-002",
+      "criterion_text": "[ ] Test: put a value to agent-status, get it back, verify content",
+      "status": "complete",
+      "evidence": "TestAgentStatusPutGet class with 2 tests: test_put_and_get_roundtrip puts a JSON object with agent_id/status/capabilities, gets it back with --raw flag, deserializes JSON and verifies all fields match. test_update_and_get_latest verifies that updating a key returns the latest value.",
+      "test_file": "tests/test_kv_watch_integration.py",
+      "implementation_files": [
+        "tests/test_kv_watch_integration.py"
+      ]
+    },
+    {
+      "criterion_id": "AC-003",
+      "criterion_text": "[ ] Test: watch agent-status in background, put a value, verify watch receives update",
+      "status": "complete",
+      "evidence": "TestAgentStatusWatch class with 2 tests: test_watch_receives_put_update starts 'nats kv watch agent-status' as a background subprocess, waits 1s for subscription, puts a value, waits 2s, terminates watch, and verifies stdout contains the key and value data. test_watch_receives_multiple_updates verifies watch captures 2 sequential puts (key appears at least twice in output).",
+      "test_file": "tests/test_kv_watch_integration.py",
+      "implementation_files": [
+        "tests/test_kv_watch_integration.py"
+      ]
+    },
+    {
+      "criterion_id": "AC-004",
+      "criterion_text": "[ ] Test: put a value to agent-registry, verify history depth (put 6 values, verify only 5 retained)",
+      "status": "complete",
+      "evidence": "TestAgentRegistryHistoryDepth class with 3 tests: test_history_depth_limited_to_5 puts 6 sequential JSON values with incrementing version numbers, runs 'nats kv history', counts PUT lines and asserts exactly 5. test_latest_value_is_most_recent verifies get returns version 6. test_oldest_history_entry_is_v2_not_v1 verifies version 1 was evicted from history.",
+      "test_file": "tests/test_kv_watch_integration.py",
+      "implementation_files": [
+        "tests/test_kv_watch_integration.py"
+      ]
+    },
+    {
+      "criterion_id": "AC-005",
+      "criterion_text": "[ ] Test: put a value to jarvis-session, verify it expires after TTL (1hr \u2014 can use shorter TTL for test)",
+      "status": "complete",
+      "evidence": "TestJarvisSessionTtlExpiry class with 3 tests: test_production_bucket_has_1h_ttl verifies jarvis-session bucket info shows 'Maximum Age: 1h0m0s'. test_put_and_get_before_expiry verifies value is retrievable immediately. test_short_ttl_bucket_expiry creates a temporary bucket with 2s TTL, puts a value, verifies immediate get succeeds, waits 4s, then verifies get fails (expired). Temp bucket is cleaned up in finally block.",
+      "test_file": "tests/test_kv_watch_integration.py",
+      "implementation_files": [
+        "tests/test_kv_watch_integration.py"
+      ]
+    },
+    {
+      "criterion_id": "AC-006",
+      "criterion_text": "[ ] Test: put a value to pipeline-state, verify it persists across broker restart",
+      "status": "complete",
+      "evidence": "TestPipelineStatePersistence class with 1 test: test_value_persists_across_broker_restart puts a JSON value to pipeline-state (file storage), verifies get before restart, runs 'docker compose restart nats', waits for NATS to become healthy (up to 30s polling), then verifies get after restart returns identical data. Re-provisions all buckets after restart (memory-backed jarvis-session is lost during restart).",
+      "test_file": "tests/test_kv_watch_integration.py",
+      "implementation_files": [
+        "tests/test_kv_watch_integration.py"
+      ]
+    },
+    {
+      "criterion_id": "AC-007",
+      "criterion_text": "[ ] Test: provision-kv.sh --dry-run produces expected output without creating buckets",
+      "status": "complete",
+      "evidence": "TestProvisionKvDryRun class with 6 tests: test_dry_run_produces_output verifies exit 0 and 'DRY RUN' in output. test_dry_run_lists_all_buckets checks all 4 bucket names in output. test_dry_run_shows_dry_run_prefix checks for [DRY-RUN] prefix. test_dry_run_does_not_connect_to_nats runs with unreachable NATS_URL to prove no server connection. test_dry_run_shows_processing_count checks '4' appears. test_dry_run_shows_summary checks 'KV Buckets:' summary line.",
+      "test_file": "tests/test_kv_watch_integration.py",
+      "implementation_files": [
+        "tests/test_kv_watch_integration.py"
+      ]
+    },
+    {
+      "criterion_id": "AC-008",
+      "criterion_text": "[ ] All tests pass against Docker Compose NATS instance",
+      "status": "complete",
+      "evidence": "All 28 integration tests pass (28 passed, 0 failed, 8 warnings in 15.93s). Tests run against Docker Compose NATS with JetStream enabled. TestAllTestsPass class provides 2 meta-tests: test_nats_server_is_healthy confirms connection, test_all_expected_buckets_are_operational verifies put/get roundtrip on all 4 buckets. The module-level fixture skips the entire test file if NATS is not available.",
+      "test_file": "tests/test_kv_watch_integration.py",
+      "implementation_files": [
+        "tests/test_kv_watch_integration.py"
+      ]
+    }
+  ]
+}
