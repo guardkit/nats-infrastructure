@@ -1,6 +1,6 @@
 ---
 id: TASK-KV-004
-title: "Document KV usage patterns in README"
+title: Document KV usage patterns in README
 task_type: documentation
 parent_review: TASK-REV-4721
 feature_id: FEAT-KV
@@ -8,8 +8,29 @@ wave: 1
 implementation_mode: direct
 complexity: 2
 dependencies: []
-status: pending
+status: in_review
 estimated_minutes: 30
+autobuild_state:
+  current_turn: 1
+  max_turns: 30
+  worktree_path: /Users/richardwoollcott/Projects/appmilla_github/nats-infrastructure/.guardkit/worktrees/FEAT-7B86
+  base_branch: main
+  started_at: '2026-04-13T22:37:29.201710'
+  last_updated: '2026-04-13T22:41:29.603076'
+  turns:
+  - turn: 1
+    decision: approve
+    feedback: null
+    timestamp: '2026-04-13T22:37:29.201710'
+    player_summary: Created comprehensive KV usage documentation in docs/kv-usage.md
+      covering all 4 KV buckets (agent-status, agent-registry, pipeline-state, jarvis-session)
+      with detailed configuration rationale, CLI operation examples (get, put, delete,
+      list, watch, history), agent interaction patterns with sequence diagrams, watch
+      pattern explanation with example output, value schemas for each bucket, and
+      troubleshooting guidance. Updated README.md KV Buckets table to include storage
+      type and history depth column
+    player_success: true
+    coach_success: true
 ---
 
 # Task: Document KV usage patterns in README

@@ -1,6 +1,6 @@
 ---
 id: TASK-KV-005
-title: "Test KV watch - agent-status and agent-registry scenarios"
+title: Test KV watch - agent-status and agent-registry scenarios
 task_type: testing
 parent_review: TASK-REV-4721
 feature_id: FEAT-KV
@@ -8,9 +8,30 @@ wave: 3
 implementation_mode: direct
 complexity: 3
 dependencies:
-  - TASK-KV-002
-status: pending
+- TASK-KV-002
+status: in_review
 estimated_minutes: 30
+autobuild_state:
+  current_turn: 1
+  max_turns: 30
+  worktree_path: /Users/richardwoollcott/Projects/appmilla_github/nats-infrastructure/.guardkit/worktrees/FEAT-7B86
+  base_branch: main
+  started_at: '2026-04-13T22:51:32.960907'
+  last_updated: '2026-04-13T23:01:42.688211'
+  turns:
+  - turn: 1
+    decision: approve
+    feedback: null
+    timestamp: '2026-04-13T22:51:32.960907'
+    player_summary: 'Created comprehensive integration test suite (tests/test_kv_watch_integration.py)
+      that validates all 4 KV buckets provisioned by provision-kv.sh against a real
+      Docker Compose NATS instance. Tests cover: bucket creation verification, put/get
+      roundtrips, KV watch receiving live updates, history depth enforcement, TTL
+      expiry (using a short-lived temp bucket for feasible testing), data persistence
+      across broker restart, and --dry-run mode verification. Tests use subprocess
+      calls to the nats CLI with'
+    player_success: true
+    coach_success: true
 ---
 
 # Task: Test KV watch - agent-status and agent-registry scenarios
