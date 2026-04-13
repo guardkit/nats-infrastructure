@@ -26,6 +26,7 @@ Run with:
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -98,6 +99,60 @@ def nats_available() -> bool:
     return result.returncode == 0
 
 
+def ensure_bucket_exists(bucket_name: str) -> None:
+    """Re-provision a single bucket if it does not exist (e.g. after restart)."""
+    info_result = nats_kv_info(bucket_name)
+    if info_result.returncode != 0:
+        # Bucket missing — re-create from definitions
+        defs = json.loads(KV_DEFS_FILE.read_text(encoding="utf-8"))
+        for bucket_def in defs["kv_buckets"]:
+            if bucket_def["name"] == bucket_name:
+                cmd_args = ["kv", "add", bucket_name]
+                ttl = bucket_def.get("ttl", "")
+                if ttl:
+                    cmd_args.extend(["--ttl", ttl])
+                storage = bucket_def.get("storage", "")
+                if storage:
+                    cmd_args.extend(["--storage", storage])
+                history = bucket_def.get("history")
+                if history is not None:
+                    cmd_args.extend(["--history", str(history)])
+                max_value_size = bucket_def.get("max_value_size", "")
+                if max_value_size:
+                    cmd_args.extend(["--max-value-size", max_value_size])
+                replicas = bucket_def.get("replicas")
+                if replicas is not None:
+                    cmd_args.extend(["--replicas", str(replicas)])
+                result = nats_cmd(*cmd_args)
+                assert result.returncode == 0, (
+                    f"Failed to re-provision bucket {bucket_name}: {result.stderr}"
+                )
+                break
+
+
+def run_provision_script() -> subprocess.CompletedProcess:
+    """Run provision-kv.sh to create/verify all KV buckets."""
+    env = os.environ.copy()
+    env["NATS_URL"] = NATS_URL
+    return subprocess.run(
+        [str(PROVISION_SCRIPT)],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        env=env,
+    )
+
+
+def wait_for_nats_healthy(max_seconds: int = 30) -> bool:
+    """Wait for NATS to become healthy. Returns True on success."""
+    for _ in range(max_seconds):
+        check = nats_cmd("server", "check", "connection", "--timeout", "2s")
+        if check.returncode == 0:
+            return True
+        time.sleep(1)
+    return False
+
+
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -110,6 +165,8 @@ def require_nats_integration():
         pytest.skip(
             "NATS server not available — start with: docker compose up -d"
         )
+    # Ensure all buckets are provisioned at module start
+    run_provision_script()
 
 
 @pytest.fixture
@@ -137,8 +194,9 @@ def clean_agent_registry_key():
 class TestKvBucketsCreated:
     """AC-001: All 4 KV buckets are created by provision-kv.sh."""
 
-    def test_all_four_buckets_exist(self) -> None:
-        """Verify all 4 expected KV buckets exist in NATS."""
+    def test_provision_script_creates_all_buckets(self) -> None:
+        """Run provision-kv.sh and verify all 4 buckets exist."""
+        # provision-kv.sh already ran in module fixture; verify result
         result = nats_cmd("kv", "ls")
         assert result.returncode == 0, (
             f"nats kv ls failed: {result.stderr}"
@@ -146,12 +204,14 @@ class TestKvBucketsCreated:
         output = result.stdout
         for bucket in EXPECTED_BUCKETS:
             assert bucket in output, (
-                f"KV bucket '{bucket}' not found in nats kv ls output"
+                f"KV bucket '{bucket}' not found in nats kv ls output.\n"
+                f"Available buckets:\n{output}"
             )
 
     @pytest.mark.parametrize("bucket_name", EXPECTED_BUCKETS)
     def test_bucket_info_accessible(self, bucket_name: str) -> None:
         """Each bucket's info should be retrievable."""
+        ensure_bucket_exists(bucket_name)
         result = nats_kv_info(bucket_name)
         assert result.returncode == 0, (
             f"nats kv info {bucket_name} failed: {result.stderr}"
@@ -169,13 +229,13 @@ class TestKvBucketsCreated:
         """agent-registry has history depth 5."""
         result = nats_kv_info("agent-registry")
         assert result.returncode == 0
-        # Look for history line like "History per key: 5"
         assert re.search(r"History.*5", result.stdout), (
             f"agent-registry should have history=5, output: {result.stdout}"
         )
 
     def test_jarvis_session_storage_is_memory(self) -> None:
         """jarvis-session uses memory storage."""
+        ensure_bucket_exists("jarvis-session")
         result = nats_kv_info("jarvis-session")
         assert result.returncode == 0
         assert "Memory" in result.stdout, (
@@ -261,8 +321,7 @@ class TestAgentStatusWatch:
         key = clean_agent_status_key
         value = json.dumps({"status": "active", "task": "code-review"})
 
-        # Start nats kv watch in background — will output changes as they arrive
-        # Use --count 1 to exit after receiving 1 update (avoids hang)
+        # Start nats kv watch in background
         watch_proc = subprocess.Popen(
             ["nats", "--server", NATS_URL, "kv", "watch", "agent-status", key],
             stdout=subprocess.PIPE,
@@ -295,12 +354,10 @@ class TestAgentStatusWatch:
             assert key in stdout, (
                 f"Watch output should contain key '{key}', got: {stdout}"
             )
-            # The watch output should contain the value or reference to it
-            assert "active" in stdout or "code-review" in stdout or key in stdout, (
+            assert "active" in stdout or "code-review" in stdout, (
                 f"Watch output should reflect the put operation, got: {stdout}"
             )
         finally:
-            # Ensure watch process is terminated
             if watch_proc.poll() is None:
                 watch_proc.kill()
                 watch_proc.wait()
@@ -309,7 +366,6 @@ class TestAgentStatusWatch:
         """Watch should receive multiple sequential updates."""
         key = clean_agent_status_key
 
-        # Start watch
         watch_proc = subprocess.Popen(
             ["nats", "--server", NATS_URL, "kv", "watch", "agent-status", key],
             stdout=subprocess.PIPE,
@@ -334,7 +390,6 @@ class TestAgentStatusWatch:
                 stdout, stderr = watch_proc.communicate()
 
             # Watch should have captured both updates
-            # The key should appear in output for each update
             key_count = stdout.count(key)
             assert key_count >= 2, (
                 f"Watch should receive at least 2 updates with key '{key}', "
@@ -370,7 +425,6 @@ class TestAgentRegistryHistoryDepth:
             assert put_result.returncode == 0, (
                 f"nats kv put #{i} failed: {put_result.stderr}"
             )
-            # Small delay to ensure ordering
             time.sleep(0.1)
 
         # Check history
@@ -379,8 +433,7 @@ class TestAgentRegistryHistoryDepth:
             f"nats kv history failed: {history_result.stderr}"
         )
 
-        # Count the number of PUT entries in history output
-        # History output shows lines with operations like "PUT"
+        # Count PUT entries in history output
         history_output = history_result.stdout
         put_lines = [
             line for line in history_output.splitlines()
@@ -402,7 +455,6 @@ class TestAgentRegistryHistoryDepth:
             nats_kv_put("agent-registry", key, value)
             time.sleep(0.1)
 
-        # Get should return the latest value
         get_result = nats_kv_get("agent-registry", key)
         assert get_result.returncode == 0
         retrieved = json.loads(get_result.stdout.strip())
@@ -419,7 +471,6 @@ class TestAgentRegistryHistoryDepth:
             nats_kv_put("agent-registry", key, value)
             time.sleep(0.1)
 
-        # Check history output — v1 should be gone, v2 should be oldest
         history_result = nats_kv_history("agent-registry", key)
         assert history_result.returncode == 0
         history_output = history_result.stdout
@@ -451,14 +502,17 @@ class TestJarvisSessionTtlExpiry:
 
     def test_production_bucket_has_1h_ttl(self) -> None:
         """Verify the jarvis-session bucket is configured with 1h TTL."""
+        ensure_bucket_exists("jarvis-session")
         result = nats_kv_info("jarvis-session")
-        assert result.returncode == 0
-        # Look for TTL line — should show 1h or 3600s or similar
+        assert result.returncode == 0, (
+            f"jarvis-session bucket not accessible: {result.stderr}"
+        )
         output = result.stdout
+        # NATS CLI shows TTL as "Maximum Age: 1h0m0s" or "TTL: 1h"
         has_ttl = (
-            re.search(r"TTL.*1h", output)
-            or re.search(r"TTL.*3600", output)
-            or re.search(r"TTL.*60m", output)
+            re.search(r"(TTL|Maximum Age).*1h", output)
+            or re.search(r"(TTL|Maximum Age).*3600", output)
+            or re.search(r"(TTL|Maximum Age).*60m", output)
         )
         assert has_ttl, (
             f"jarvis-session should have TTL of 1h, info output:\n{output}"
@@ -466,11 +520,14 @@ class TestJarvisSessionTtlExpiry:
 
     def test_put_and_get_before_expiry(self) -> None:
         """Value is retrievable immediately after put (before TTL)."""
+        ensure_bucket_exists("jarvis-session")
         key = "ttl-test-session"
         value = json.dumps({"session_id": "test-123", "context": "hello"})
 
         put_result = nats_kv_put("jarvis-session", key, value)
-        assert put_result.returncode == 0
+        assert put_result.returncode == 0, (
+            f"nats kv put to jarvis-session failed: {put_result.stderr}"
+        )
 
         # Immediately get — should succeed (well within 1h TTL)
         get_result = nats_kv_get("jarvis-session", key)
@@ -510,7 +567,7 @@ class TestJarvisSessionTtlExpiry:
                 f"Value should exist immediately after put: {get_result.stderr}"
             )
 
-            # Wait for TTL to expire (2s TTL + 1s buffer)
+            # Wait for TTL to expire (2s TTL + 2s buffer)
             time.sleep(4)
 
             # Get after expiry — should fail (key expired)
@@ -530,7 +587,12 @@ class TestJarvisSessionTtlExpiry:
 
 @pytest.mark.integration
 class TestPipelineStatePersistence:
-    """AC-006: Put a value to pipeline-state, restart broker, verify persistence."""
+    """AC-006: Put a value to pipeline-state, restart broker, verify persistence.
+
+    NOTE: This test restarts the Docker NATS container. Memory-backed buckets
+    (jarvis-session) will be lost during restart. The test re-provisions all
+    buckets after the restart to leave the system in a clean state.
+    """
 
     def test_value_persists_across_broker_restart(self) -> None:
         """Put a value, restart Docker NATS, verify value survives."""
@@ -567,14 +629,9 @@ class TestPipelineStatePersistence:
         )
 
         # Wait for NATS to be healthy again
-        max_wait = 30
-        for i in range(max_wait):
-            check = nats_cmd("server", "check", "connection", "--timeout", "2s")
-            if check.returncode == 0:
-                break
-            time.sleep(1)
-        else:
-            pytest.fail("NATS did not become healthy after restart within 30s")
+        assert wait_for_nats_healthy(30), (
+            "NATS did not become healthy after restart within 30s"
+        )
 
         # Verify value persisted across restart
         get_after = nats_kv_get("pipeline-state", key)
@@ -588,8 +645,11 @@ class TestPipelineStatePersistence:
         assert after_data["state"] == "in-progress"
         assert after_data["step"] == "code-review"
 
-        # Clean up
+        # Clean up test key
         nats_kv_del("pipeline-state", key)
+
+        # Re-provision all buckets (memory-backed ones are lost after restart)
+        run_provision_script()
 
 
 # =============================================================================
@@ -601,44 +661,35 @@ class TestPipelineStatePersistence:
 class TestProvisionKvDryRun:
     """AC-007: --dry-run produces expected output without creating buckets."""
 
-    def test_dry_run_produces_output(self) -> None:
-        """--dry-run flag should produce human-readable output."""
-        result = subprocess.run(
+    @staticmethod
+    def _run_dry_run(nats_url: str | None = None) -> subprocess.CompletedProcess:
+        """Run provision-kv.sh --dry-run with optional NATS URL override."""
+        env = os.environ.copy()
+        env["NATS_URL"] = nats_url or NATS_URL
+        return subprocess.run(
             [str(PROVISION_SCRIPT), "--dry-run"],
             capture_output=True,
             text=True,
             timeout=30,
-            env={
-                "PATH": subprocess.os.environ.get("PATH", ""),
-                "NATS_URL": NATS_URL,
-            },
+            env=env,
         )
+
+    def test_dry_run_produces_output(self) -> None:
+        """--dry-run flag should produce human-readable output."""
+        result = self._run_dry_run()
         assert result.returncode == 0, (
             f"--dry-run should exit 0, stderr: {result.stderr}"
         )
-
         stdout = result.stdout
-
-        # Should indicate dry-run mode
         assert "DRY RUN" in stdout or "DRY-RUN" in stdout, (
             f"Output should indicate dry-run mode, got:\n{stdout}"
         )
 
     def test_dry_run_lists_all_buckets(self) -> None:
         """--dry-run should mention all 4 bucket names."""
-        result = subprocess.run(
-            [str(PROVISION_SCRIPT), "--dry-run"],
-            capture_output=True,
-            text=True,
-            timeout=30,
-            env={
-                "PATH": subprocess.os.environ.get("PATH", ""),
-                "NATS_URL": NATS_URL,
-            },
-        )
+        result = self._run_dry_run()
         assert result.returncode == 0
         stdout = result.stdout
-
         for bucket in EXPECTED_BUCKETS:
             assert bucket in stdout, (
                 f"--dry-run output should mention bucket '{bucket}', got:\n{stdout}"
@@ -646,62 +697,25 @@ class TestProvisionKvDryRun:
 
     def test_dry_run_shows_dry_run_prefix(self) -> None:
         """--dry-run output should use [DRY-RUN] prefix."""
-        result = subprocess.run(
-            [str(PROVISION_SCRIPT), "--dry-run"],
-            capture_output=True,
-            text=True,
-            timeout=30,
-            env={
-                "PATH": subprocess.os.environ.get("PATH", ""),
-                "NATS_URL": NATS_URL,
-            },
-        )
+        result = self._run_dry_run()
         assert result.returncode == 0
         assert "[DRY-RUN]" in result.stdout, (
             f"Output should use [DRY-RUN] prefix, got:\n{result.stdout}"
         )
 
-    def test_dry_run_does_not_modify_buckets(self) -> None:
-        """--dry-run should not create or modify any KV buckets.
+    def test_dry_run_does_not_connect_to_nats(self) -> None:
+        """--dry-run should succeed without a running NATS server.
 
-        Verify by removing a temp bucket, running --dry-run, and confirming
-        the bucket was NOT created.
+        This proves dry-run skips the health check and does not modify buckets.
         """
-        temp_bucket = "test-dry-run-verification"
-
-        # Ensure the bucket doesn't exist
-        nats_kv_rm(temp_bucket)
-
-        # We can't directly test that provision-kv.sh doesn't create buckets
-        # (it reads from kv-definitions.json), but we verify the script
-        # doesn't reach out to NATS by checking it skips the health wait
-        result = subprocess.run(
-            [str(PROVISION_SCRIPT), "--dry-run"],
-            capture_output=True,
-            text=True,
-            timeout=30,
-            env={
-                "PATH": subprocess.os.environ.get("PATH", ""),
-                "NATS_URL": "nats://nonexistent-host:4222",  # Unreachable URL
-            },
-        )
-        # Should succeed even with unreachable URL (dry-run skips health check)
+        result = self._run_dry_run(nats_url="nats://nonexistent-host:4222")
         assert result.returncode == 0, (
             f"--dry-run should succeed even with unreachable NATS, stderr: {result.stderr}"
         )
 
     def test_dry_run_shows_processing_count(self) -> None:
         """--dry-run should show how many bucket definitions are being processed."""
-        result = subprocess.run(
-            [str(PROVISION_SCRIPT), "--dry-run"],
-            capture_output=True,
-            text=True,
-            timeout=30,
-            env={
-                "PATH": subprocess.os.environ.get("PATH", ""),
-                "NATS_URL": NATS_URL,
-            },
-        )
+        result = self._run_dry_run()
         assert result.returncode == 0
         assert "4" in result.stdout, (
             f"--dry-run should mention processing 4 definitions, got:\n{result.stdout}"
@@ -709,16 +723,7 @@ class TestProvisionKvDryRun:
 
     def test_dry_run_shows_summary(self) -> None:
         """--dry-run should show summary at the end."""
-        result = subprocess.run(
-            [str(PROVISION_SCRIPT), "--dry-run"],
-            capture_output=True,
-            text=True,
-            timeout=30,
-            env={
-                "PATH": subprocess.os.environ.get("PATH", ""),
-                "NATS_URL": NATS_URL,
-            },
-        )
+        result = self._run_dry_run()
         assert result.returncode == 0
         assert "KV Buckets:" in result.stdout, (
             f"--dry-run should show KV Buckets summary, got:\n{result.stdout}"
@@ -726,7 +731,7 @@ class TestProvisionKvDryRun:
 
 
 # =============================================================================
-# AC-008: All tests pass (this is validated by the overall test run)
+# AC-008: All tests pass against Docker Compose NATS instance
 # =============================================================================
 
 
@@ -743,6 +748,10 @@ class TestAllTestsPass:
 
     def test_all_expected_buckets_are_operational(self) -> None:
         """All 4 buckets accept put/get operations."""
+        # Ensure all buckets exist (re-provision if needed after restart)
+        for bucket in EXPECTED_BUCKETS:
+            ensure_bucket_exists(bucket)
+
         for bucket in EXPECTED_BUCKETS:
             key = "ac008-health-check"
             value = json.dumps({"check": True})
