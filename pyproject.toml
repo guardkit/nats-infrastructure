@@ -1,0 +1,9 @@
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+addopts = "-m 'not integration'"
+markers = [
+    "integration: requires real NATS server (run with '-m integration')",
+    "seam: cross-module contract tests",
+    "integration_contract: tests that verify integration contracts",
+]

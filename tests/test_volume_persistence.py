@@ -419,9 +419,9 @@ class TestVolumePersistenceIntegration:
         self._run("docker compose up -d")
         assert self._wait_for_healthy(), "NATS container did not become healthy"
 
-        # Create a test stream
+        # Create a test stream (nats CLI runs on host, connects to exposed port)
         result = self._run(
-            "docker compose exec -T nats nats -s nats://localhost:4222 "
+            "nats -s nats://localhost:4222 "
             "stream add PERSISTENCE_TEST "
             "--subjects='persistence.test' "
             "--storage=file "
@@ -441,7 +441,7 @@ class TestVolumePersistenceIntegration:
         # Publish test messages
         for i in range(3):
             pub_result = self._run(
-                f"docker compose exec -T nats nats -s nats://localhost:4222 "
+                f"nats -s nats://localhost:4222 "
                 f"pub persistence.test 'test-message-{i}'"
             )
             assert pub_result.returncode == 0, (
@@ -450,7 +450,7 @@ class TestVolumePersistenceIntegration:
 
         # Verify stream exists and has messages
         info_result = self._run(
-            "docker compose exec -T nats nats -s nats://localhost:4222 "
+            "nats -s nats://localhost:4222 "
             "stream info PERSISTENCE_TEST --json"
         )
         assert info_result.returncode == 0, (
@@ -464,9 +464,9 @@ class TestVolumePersistenceIntegration:
         self._run("docker compose up -d")
         assert self._wait_for_healthy(), "NATS container did not become healthy"
 
-        # Create stream
+        # Create stream (nats CLI runs on host, connects to exposed port)
         self._run(
-            "docker compose exec -T nats nats -s nats://localhost:4222 "
+            "nats -s nats://localhost:4222 "
             "stream add SURVIVAL_TEST "
             "--subjects='survival.test' "
             "--storage=file "
@@ -482,7 +482,7 @@ class TestVolumePersistenceIntegration:
 
         # Publish a message
         self._run(
-            "docker compose exec -T nats nats -s nats://localhost:4222 "
+            "nats -s nats://localhost:4222 "
             "pub survival.test 'before-restart'"
         )
 
@@ -495,7 +495,7 @@ class TestVolumePersistenceIntegration:
 
         # Verify stream still exists
         info_result = self._run(
-            "docker compose exec -T nats nats -s nats://localhost:4222 "
+            "nats -s nats://localhost:4222 "
             "stream info SURVIVAL_TEST --json"
         )
         assert info_result.returncode == 0, (
@@ -511,9 +511,9 @@ class TestVolumePersistenceIntegration:
         self._run("docker compose up -d")
         assert self._wait_for_healthy(), "NATS container did not become healthy"
 
-        # Create stream
+        # Create stream (nats CLI runs on host, connects to exposed port)
         self._run(
-            "docker compose exec -T nats nats -s nats://localhost:4222 "
+            "nats -s nats://localhost:4222 "
             "stream add RETRIEVAL_TEST "
             "--subjects='retrieval.test' "
             "--storage=file "
@@ -530,7 +530,7 @@ class TestVolumePersistenceIntegration:
         # Publish messages
         for i in range(5):
             self._run(
-                f"docker compose exec -T nats nats -s nats://localhost:4222 "
+                f"nats -s nats://localhost:4222 "
                 f"pub retrieval.test 'persistent-msg-{i}'"
             )
 
@@ -543,7 +543,7 @@ class TestVolumePersistenceIntegration:
 
         # Retrieve messages — check stream info shows message count
         info_result = self._run(
-            "docker compose exec -T nats nats -s nats://localhost:4222 "
+            "nats -s nats://localhost:4222 "
             "stream info RETRIEVAL_TEST --json"
         )
         assert info_result.returncode == 0, (
