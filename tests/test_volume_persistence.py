@@ -17,6 +17,7 @@ Test categories:
 
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 from pathlib import Path
@@ -373,8 +374,9 @@ class TestDataLossWarning:
 class TestVolumePersistenceIntegration:
     """Integration tests verifying actual volume persistence with Docker.
 
-    These tests require Docker Compose and a running NATS server.
-    Run with: pytest -m integration tests/test_volume_persistence.py -v
+    These tests require Docker Compose, a running NATS server, and
+    RICH_NATS_PASSWORD set in the environment (source .env first).
+    Run with: source .env && pytest -m integration tests/test_volume_persistence.py -v
 
     The tests verify the full lifecycle:
     1. Start NATS container
@@ -394,6 +396,12 @@ class TestVolumePersistenceIntegration:
             timeout=timeout,
             cwd=str(PROJECT_ROOT),
         )
+
+    @staticmethod
+    def _nats_cmd(args: str) -> str:
+        """Build a nats CLI command with authentication credentials."""
+        password = os.environ.get("RICH_NATS_PASSWORD", "")
+        return f"nats -s nats://localhost:4222 --user rich --password '{password}' {args}"
 
     @staticmethod
     def _wait_for_healthy(max_wait: int = 30) -> bool:
@@ -421,28 +429,28 @@ class TestVolumePersistenceIntegration:
 
         # Create a test stream (nats CLI runs on host, connects to exposed port)
         result = self._run(
-            "nats -s nats://localhost:4222 "
-            "stream add PERSISTENCE_TEST "
-            "--subjects='persistence.test' "
-            "--storage=file "
-            "--retention=limits "
-            "--max-msgs=-1 "
-            "--max-bytes=-1 "
-            "--max-age=1h "
-            "--max-msg-size=-1 "
-            "--discard=old "
-            "--replicas=1 "
-            "--no-allow-rollup "
-            "--deny-delete "
-            "--deny-purge "
-            "--defaults 2>/dev/null || true"
+            self._nats_cmd(
+                "stream add PERSISTENCE_TEST "
+                "--subjects='persistence.test' "
+                "--storage=file "
+                "--retention=limits "
+                "--max-msgs=-1 "
+                "--max-bytes=-1 "
+                "--max-age=1h "
+                "--max-msg-size=-1 "
+                "--discard=old "
+                "--replicas=1 "
+                "--no-allow-rollup "
+                "--deny-delete "
+                "--deny-purge "
+                "--defaults 2>/dev/null || true"
+            )
         )
 
         # Publish test messages
         for i in range(3):
             pub_result = self._run(
-                f"nats -s nats://localhost:4222 "
-                f"pub persistence.test 'test-message-{i}'"
+                self._nats_cmd(f"pub persistence.test 'test-message-{i}'")
             )
             assert pub_result.returncode == 0, (
                 f"Failed to publish message {i}: {pub_result.stderr}"
@@ -450,8 +458,7 @@ class TestVolumePersistenceIntegration:
 
         # Verify stream exists and has messages
         info_result = self._run(
-            "nats -s nats://localhost:4222 "
-            "stream info PERSISTENCE_TEST --json"
+            self._nats_cmd("stream info PERSISTENCE_TEST --json")
         )
         assert info_result.returncode == 0, (
             f"Failed to get stream info: {info_result.stderr}"
@@ -466,24 +473,24 @@ class TestVolumePersistenceIntegration:
 
         # Create stream (nats CLI runs on host, connects to exposed port)
         self._run(
-            "nats -s nats://localhost:4222 "
-            "stream add SURVIVAL_TEST "
-            "--subjects='survival.test' "
-            "--storage=file "
-            "--retention=limits "
-            "--max-msgs=-1 "
-            "--max-bytes=-1 "
-            "--max-age=1h "
-            "--max-msg-size=-1 "
-            "--discard=old "
-            "--replicas=1 "
-            "--defaults 2>/dev/null || true"
+            self._nats_cmd(
+                "stream add SURVIVAL_TEST "
+                "--subjects='survival.test' "
+                "--storage=file "
+                "--retention=limits "
+                "--max-msgs=-1 "
+                "--max-bytes=-1 "
+                "--max-age=1h "
+                "--max-msg-size=-1 "
+                "--discard=old "
+                "--replicas=1 "
+                "--defaults 2>/dev/null || true"
+            )
         )
 
         # Publish a message
         self._run(
-            "nats -s nats://localhost:4222 "
-            "pub survival.test 'before-restart'"
+            self._nats_cmd("pub survival.test 'before-restart'")
         )
 
         # docker compose down (preserves volumes) then up
@@ -495,8 +502,7 @@ class TestVolumePersistenceIntegration:
 
         # Verify stream still exists
         info_result = self._run(
-            "nats -s nats://localhost:4222 "
-            "stream info SURVIVAL_TEST --json"
+            self._nats_cmd("stream info SURVIVAL_TEST --json")
         )
         assert info_result.returncode == 0, (
             f"Stream SURVIVAL_TEST not found after restart: {info_result.stderr}"
@@ -513,25 +519,25 @@ class TestVolumePersistenceIntegration:
 
         # Create stream (nats CLI runs on host, connects to exposed port)
         self._run(
-            "nats -s nats://localhost:4222 "
-            "stream add RETRIEVAL_TEST "
-            "--subjects='retrieval.test' "
-            "--storage=file "
-            "--retention=limits "
-            "--max-msgs=-1 "
-            "--max-bytes=-1 "
-            "--max-age=1h "
-            "--max-msg-size=-1 "
-            "--discard=old "
-            "--replicas=1 "
-            "--defaults 2>/dev/null || true"
+            self._nats_cmd(
+                "stream add RETRIEVAL_TEST "
+                "--subjects='retrieval.test' "
+                "--storage=file "
+                "--retention=limits "
+                "--max-msgs=-1 "
+                "--max-bytes=-1 "
+                "--max-age=1h "
+                "--max-msg-size=-1 "
+                "--discard=old "
+                "--replicas=1 "
+                "--defaults 2>/dev/null || true"
+            )
         )
 
         # Publish messages
         for i in range(5):
             self._run(
-                f"nats -s nats://localhost:4222 "
-                f"pub retrieval.test 'persistent-msg-{i}'"
+                self._nats_cmd(f"pub retrieval.test 'persistent-msg-{i}'")
             )
 
         # Restart
@@ -543,8 +549,7 @@ class TestVolumePersistenceIntegration:
 
         # Retrieve messages — check stream info shows message count
         info_result = self._run(
-            "nats -s nats://localhost:4222 "
-            "stream info RETRIEVAL_TEST --json"
+            self._nats_cmd("stream info RETRIEVAL_TEST --json")
         )
         assert info_result.returncode == 0, (
             f"Stream not found after restart: {info_result.stderr}"
