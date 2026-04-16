@@ -399,8 +399,21 @@ class TestVolumePersistenceIntegration:
 
     @staticmethod
     def _nats_cmd(args: str) -> str:
-        """Build a nats CLI command with authentication credentials."""
+        """Build a nats CLI command with authentication credentials.
+
+        Reads RICH_NATS_PASSWORD from os.environ first, falling back to
+        parsing the .env file directly (source .env without export does not
+        propagate variables to child processes).
+        """
         password = os.environ.get("RICH_NATS_PASSWORD", "")
+        if not password:
+            env_file = PROJECT_ROOT / ".env"
+            if env_file.exists():
+                for line in env_file.read_text().splitlines():
+                    line = line.strip()
+                    if line.startswith("RICH_NATS_PASSWORD="):
+                        password = line.split("=", 1)[1]
+                        break
         return f"nats -s nats://localhost:4222 --user rich --password '{password}' {args}"
 
     @staticmethod
