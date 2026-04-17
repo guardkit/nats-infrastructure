@@ -238,6 +238,31 @@ fi
 echo ""
 
 # ---------------------------------------------------------------------------
+# Check 4b: Placeholder credentials rejected (security regression guard)
+# ---------------------------------------------------------------------------
+# Regression guard for the MacBook "changeme substitution" incident — if the
+# entrypoint's envsubst step silently failed and left the placeholder value
+# in the accounts config, the server would accept `rich:changeme` as a valid
+# login. We explicitly assert that authentication FAILS with the placeholder.
+echo "--- Check 4b: Placeholder Credentials Rejected ---"
+
+if has_command nats; then
+    placeholder_auth=$(nats pub test.placeholder "placeholder-should-fail" \
+        --user rich --password "changeme" \
+        --server "nats://localhost:4222" \
+        --timeout 3s 2>&1) || true
+
+    if echo "$placeholder_auth" | grep -qi "published\|ok\|success"; then
+        fail_check "SECURITY: 'rich:changeme' was accepted — placeholder leaked into config"
+    else
+        pass_check "'rich:changeme' rejected (authentication error as expected)"
+    fi
+else
+    echo "  [SKIP] Placeholder credential check — nats CLI not installed"
+fi
+echo ""
+
+# ---------------------------------------------------------------------------
 # Check 5: JetStream streams provisioned (optional — requires nats CLI)
 # ---------------------------------------------------------------------------
 echo "--- Check 5: JetStream Streams (Optional) ---"
