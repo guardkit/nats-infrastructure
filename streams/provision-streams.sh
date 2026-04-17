@@ -239,7 +239,14 @@ provision_kv_bucket() {
             return 0
         fi
 
-        if nats kv add "$name" "${NATS_OPTS[@]}" "${ttl_opts[@]}" >/dev/null 2>&1; then
+        # Guard expansion: bash 3.2 (macOS) errors on "${empty_arr[@]}" under set -u
+        local kv_add_rc=0
+        if [[ ${#ttl_opts[@]} -gt 0 ]]; then
+            nats kv add "$name" "${NATS_OPTS[@]}" "${ttl_opts[@]}" >/dev/null 2>&1 || kv_add_rc=$?
+        else
+            nats kv add "$name" "${NATS_OPTS[@]}" >/dev/null 2>&1 || kv_add_rc=$?
+        fi
+        if [[ $kv_add_rc -eq 0 ]]; then
             echo "[CREATE] KV $name"
             kv_created=$((kv_created + 1))
         else
