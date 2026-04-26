@@ -7,3 +7,13 @@ markers = [
     "seam: cross-module contract tests",
     "integration_contract: tests that verify integration contracts",
 ]
+
+# PEP 735 dev-dependency group. nats-infrastructure is a Docker/infra repo
+# (no [project] table) — this is the lightest-touch way to declare test deps.
+# Install with: python -m pip install --group dev
+[dependency-groups]
+dev = [
+    # pytest-bdd: required for `.feature` scenario discovery so future @task: tags
+    # are not silently bypassed. See guardkit TASK-OPS-BDDM-7 / FEAT-BDDM.
+    "pytest-bdd>=8.1,<9",
+]
