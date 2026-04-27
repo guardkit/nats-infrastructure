@@ -1,4 +1,4 @@
-project_id: nats-infrastructure
+project_id: nats_infrastructure
 enabled: true
 graph_store: falkordb
 falkordb_host: whitestocks
