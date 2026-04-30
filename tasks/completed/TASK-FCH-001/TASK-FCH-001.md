@@ -1,11 +1,15 @@
 ---
 id: TASK-FCH-001
 title: "Canonical NATS provisioning for forge (FEAT-FORGE-008 Phase 4+)"
-status: in_progress
+status: completed
 priority: high
 created: 2026-04-30T00:00:00Z
-updated: 2026-04-30T12:00:00Z
-previous_state: backlog
+updated: 2026-04-30T19:30:00Z
+completed: 2026-04-30T19:30:00Z
+previous_state: in_progress
+completed_location: tasks/completed/TASK-FCH-001/
+organized_files:
+  - TASK-FCH-001.md
 tags: [forge, handoff, canonical-provisioning, jetstream, kv, feat-forge-008]
 task_type: implementation
 complexity: 5
