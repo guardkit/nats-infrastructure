@@ -1,11 +1,18 @@
 # Memory Relay — Scope Document
 
+> ⚠️ **SUPERSEDED (2026-06-24) by [`memory-write-path-v2-post-graphiti.md`](memory-write-path-v2-post-graphiti.md).**
+> Graphiti is being decommissioned; fleet-memory (deterministic Postgres+pgvector) is the path forward.
+> The Graphiti-specific machinery below (drain gated on model residency D5, trace proxy / `MEMORY_TRACES`
+> D8, the 28 GB reclaim D10) is obsolete. The transport/buffer contract (durable `MEMORY` stream, nats-core
+> publisher, framework-neutral schema, idempotency) is retained and reconciled in v2. Kept for historical
+> rationale (the original LLM-on-the-write-path problem).
+
 Durable episode buffer + extraction trace capture for Graphiti (and any future
 memory engine) across the Ship's Computer fleet.
 
 **Date:** 2026-06-12
 **Author:** Rich (drafted with Claude Desktop)
-**Status:** Draft — input to `/feature-spec`
+**Status:** **Superseded** — see banner above (was: Draft — input to `/feature-spec`)
 **Home repo:** `nats-infrastructure` (service + streams). Schemas/publisher in `nats-core`.
 **Feature ID:** assigned by `/feature-plan`
 **Explicitly NOT owned by:** guardkit. GuardKit is the *first publisher*, not the owner.
