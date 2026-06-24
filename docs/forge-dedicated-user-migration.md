@@ -13,13 +13,17 @@ credential can be rotated/revoked/audited independently of the humans, and the i
 
 ## Broker side (this repo)
 
-- `config/accounts/accounts.conf.template` — added a `forge` user to APPMILLA with full `>` pub/sub
-  (same scope as `rich`/`james`; the **account** is the privilege boundary). Subject-level scoping
-  (`pipeline.>`/`runbook.>`/`agents.>`/`fleet.>` + `$JS.API.>`/`$KV.>`) was attempted but **the
-  entrypoint's blanket `envsubst` clobbers `$JS`/`$KV`** (treats them as shell vars → empty →
-  `nats-server` rejects `".API.>"`). Proper scoping needs `envsubst` restricted to the `*_PASSWORD`
-  vars (e.g. `envsubst '${RICH_NATS_PASSWORD} … ${FORGE_NATS_PASSWORD}'`) **and an image rebuild** —
-  left as a future hardening.
+- `config/accounts/accounts.conf.template` — added a `forge` user to APPMILLA. **Now subject-scoped**
+  (2026-06-24, least privilege): `pipeline.> runbook.> agents.> fleet.> $JS.> $KV.> _INBOX.>` for
+  both publish and subscribe. Verified enforced (forge publishes `runbook.>` but is denied
+  `notifications.>`). _Originally landed as full `>` because the entrypoint's blanket `envsubst`
+  clobbered `$JS`/`$KV`; that is now fixed (below), so the scoped form works._
+- `scripts/docker-entrypoint.sh` — **restricted `envsubst` to the five `*_PASSWORD` vars**
+  (`envsubst '${RICH_NATS_PASSWORD} … ${FORGE_NATS_PASSWORD}' < … > …`) so `$JS`/`$KV` system
+  subjects survive substitution. Requires an image rebuild (`docker compose build`). Note: the
+  post-substitution safeguard greps **braced** `${VAR}`, so unbraced `$JS`/`$KV` pass; but a literal
+  `${VAR}` in a template *comment* will now survive and trip it — keep template comments free of
+  `${UPPERCASE}` tokens (the header comment was reworded for this).
 - `.env` (gitignored) — added `FORGE_NATS_PASSWORD`.
 - Apply: `docker compose up -d --force-recreate` (re-renders accounts; brief reconnect blip — all
   clients auto-reconnect; `rich`/`james`/`mark` unaffected). Validate first by rendering the
@@ -48,9 +52,13 @@ Broker: `git checkout config/accounts/accounts.conf.template`, restore `.env`, `
 
 ## Follow-ups
 
-1. **Rebuild `forge:latest` from `main` (≥ TASK-FMDR-008)** so the prod image gains env-var auth
-   (`FORGE_NATS_USER/PASSWORD`), inline-cred log redaction, and the no-reconnect-spin fix. Then move
-   `nats.env` to the `FORGE_NATS_USER` + `FORGE_NATS_PASSWORD` form.
-2. **Rotate the NATS passwords** (rich/james/mark/admin were exposed in a session transcript). `rich`
+1. ✅ **Rebuilt `forge:latest` from `main` (≥ 008)** (2026-06-24) — prod image is current; its CLI
+   has 008. **But** `FORGE_NATS_USER/PASSWORD` support is only in `forge/cli/runbook.py`; the
+   **`forge serve` daemon path doesn't read it**, so `nats.env` stays inline-URL. → see 1a.
+2. ✅ **Restricted the entrypoint `envsubst`** to the `*_PASSWORD` vars and **subject-scoped the
+   `forge` user** (2026-06-24, verified enforced).
+3. **1a (NEW): teach `forge serve` to honour `FORGE_NATS_USER/PASSWORD`** (mirror the CLI's
+   `_resolve_nats_auth` in the serve NATS connect path), then drop inline-URL from `nats.env`. Forge
+   code change + image rebuild.
+4. **Rotate the NATS passwords** (rich/james/mark/admin were exposed in a session transcript). `rich`
    is used by **`nats-core`** (4 conns) — coordinate that update or it will break.
-3. **Restrict the entrypoint `envsubst`** to the `*_PASSWORD` vars → enables subject-scoped users.

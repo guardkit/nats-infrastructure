@@ -95,7 +95,13 @@ for template in "${TEMPLATE_DIR}"/*.conf.template; do
     fi
     filename=$(basename "$template" .template)
     output="${OUTPUT_DIR}/${filename}"
-    envsubst < "$template" > "$output"
+    # Restrict substitution to ONLY the password variables. A blanket
+    # `envsubst` would also clobber NATS system subjects written as `$JS.…` /
+    # `$KV.…` in permission ACLs (envsubst treats them as shell vars → empty),
+    # producing invalid subjects like `.API.>`. Naming the allowed vars leaves
+    # every other `$`-token (NATS subjects) untouched, which is what lets
+    # accounts use subject-scoped permissions including JetStream/KV subjects.
+    envsubst '${RICH_NATS_PASSWORD} ${JAMES_NATS_PASSWORD} ${MARK_NATS_PASSWORD} ${ADMIN_NATS_PASSWORD} ${FORGE_NATS_PASSWORD}' < "$template" > "$output"
     processed_any=1
     echo "Processed: ${template} -> ${output}"
 done

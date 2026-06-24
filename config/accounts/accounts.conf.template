@@ -2,8 +2,11 @@
 # NATS Account Configuration — Multi-Tenancy (ADR-002)
 # =============================================================================
 # Defines accounts, users, and permissions for the ships-computer NATS server.
-# Passwords use ${VAR} envsubst syntax — substituted at container startup by
-# scripts/docker-entrypoint.sh. Never commit real passwords to this file.
+# Passwords use envsubst dollar-brace placeholders (e.g. RICH_NATS_PASSWORD),
+# substituted at container startup by scripts/docker-entrypoint.sh — which now
+# restricts substitution to ONLY the *_PASSWORD vars, so NATS system subjects
+# written as $JS.* / $KV.* in permission ACLs survive. Never commit real
+# passwords to this file.
 #
 # Accounts:
 #   APPMILLA — Rich + James (Appmilla principals, full access)
@@ -49,18 +52,27 @@ accounts {
             {
                 # forge service identity — dedicated NATS user so the forge runtime/CLI
                 # no longer ride on a human principal's (rich's) credentials; it can be
-                # rotated/revoked/audited independently. Full pub/sub WITHIN the APPMILLA
-                # account (same as rich/james) — the account is the privilege boundary
-                # (FINPROXY/SYS are isolated). Subject-level scoping (pipeline.>/runbook.>/
-                # agents.>/fleet.> + $JS.API.>/$KV.>) is intentionally NOT used here: the
-                # entrypoint's blanket `envsubst` clobbers NATS system subjects ($JS/$KV ->
-                # empty), so scoping would require restricting envsubst to the *_PASSWORD
-                # vars and rebuilding the image. Tracked as a future hardening.
+                # rotated/revoked/audited independently.
+                #
+                # Subject-scoped (least privilege) to forge's own families plus the
+                # JetStream/KV/reply subjects it needs (durable pull consumer on PIPELINE,
+                # acks, KV bucket, request-reply inboxes). This is possible because the
+                # entrypoint now restricts `envsubst` to the *_PASSWORD vars, so the
+                # `$JS`/`$KV` system subjects below survive substitution.
+                #   produces:  pipeline.>  runbook.>  agents.>  fleet.>
+                #   consumes:  pipeline.build-queued.> (durable), agents.>, fleet.heartbeat.>
+                #   jetstream: $JS.>  (API + ACK)   kv: $KV.>   replies: _INBOX.>
                 user: "forge"
                 password: "${FORGE_NATS_PASSWORD}"
                 permissions: {
-                    publish: ">"
-                    subscribe: ">"
+                    publish: [
+                        "pipeline.>", "runbook.>", "agents.>", "fleet.>",
+                        "$JS.>", "$KV.>", "_INBOX.>"
+                    ]
+                    subscribe: [
+                        "pipeline.>", "runbook.>", "agents.>", "fleet.>",
+                        "$JS.>", "$KV.>", "_INBOX.>"
+                    ]
                 }
             }
         ]
