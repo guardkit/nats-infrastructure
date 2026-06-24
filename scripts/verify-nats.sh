@@ -268,7 +268,7 @@ echo ""
 echo "--- Check 5: JetStream Streams (Optional) ---"
 
 if has_command nats; then
-    EXPECTED_STREAMS="PIPELINE AGENTS JARVIS NOTIFICATIONS SYSTEM FLEET FINPROXY"
+    EXPECTED_STREAMS="PIPELINE AGENTS JARVIS NOTIFICATIONS SYSTEM FLEET MEMORY FINPROXY"
     streams_ok=0
     streams_missing=0
 

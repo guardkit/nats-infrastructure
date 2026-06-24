@@ -405,6 +405,46 @@ class TestFinproxyStream:
         )
 
 
+# --- MEMORY stream (FEAT-MEM-04 relay write path) ---
+
+
+class TestMemoryStream:
+    """MEMORY stream backs the fleet-memory relay (FEAT-MEM-04).
+
+    Contract (docs/decisions/MEM-04-relay-jetstream-contract.md in fleet-memory):
+    a single core stream over memory.> carries both the ingest subject
+    (memory.episode) and the DLQ subject (memory.dlq); limits retention so acked
+    episodes and parked poison age out rather than being deleted on ack.
+    """
+
+    def test_memory_stream_exists(self, streams_by_name: dict[str, dict]) -> None:
+        assert "MEMORY" in streams_by_name, "MEMORY stream not found in definitions"
+
+    def test_memory_subjects_are_partitioned_episode_and_dlq(
+        self, streams_by_name: dict[str, dict]
+    ) -> None:
+        # Publisher (nats-core) sends memory.episode.{project_id}.{episode_type};
+        # poison is parked per-project on memory.dlq.{project_id}. Both lowercase + .>.
+        assert streams_by_name["MEMORY"]["subjects"] == ["memory.episode.>", "memory.dlq.>"], (
+            "MEMORY subjects must be ['memory.episode.>', 'memory.dlq.>'], got "
+            f"{streams_by_name['MEMORY']['subjects']}"
+        )
+
+    def test_memory_retention_is_limits(
+        self, streams_by_name: dict[str, dict]
+    ) -> None:
+        # limits (not work): the relay consumer tracks position; poison on memory.dlq
+        # must be retained for inspection, not deleted on ack.
+        assert streams_by_name["MEMORY"]["retention"] == "limits", (
+            f"MEMORY retention must be 'limits', got '{streams_by_name['MEMORY']['retention']}'"
+        )
+
+    def test_memory_scope_is_core(self, streams_by_name: dict[str, dict]) -> None:
+        assert streams_by_name["MEMORY"].get("scope") == "core", (
+            f"MEMORY scope must be 'core', got '{streams_by_name['MEMORY'].get('scope')}'"
+        )
+
+
 # --- NATS duration format validation ---
 
 
@@ -517,8 +557,8 @@ class TestStreamCount:
     """Verify total number of streams matches spec (6 core + 1 project)."""
 
     def test_total_stream_count(self, streams_list: list[dict]) -> None:
-        assert len(streams_list) == 7, (
-            f"Expected 7 streams (6 core + 1 project), got {len(streams_list)}"
+        assert len(streams_list) == 8, (
+            f"Expected 8 streams (6 base core + MEMORY + 1 project), got {len(streams_list)}"
         )
 
     def test_no_duplicate_stream_names(self, streams_list: list[dict]) -> None:

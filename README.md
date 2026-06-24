@@ -51,6 +51,7 @@ by the idempotent [`streams/provision-streams.sh`](streams/provision-streams.sh)
 | NOTIFICATIONS | `notifications.>` | work | 24h | Outbound notifications to adapters |
 | SYSTEM | `system.>` | limits | 1h | Health checks, config updates |
 | FLEET | `fleet.>` | limits | 1h | Agent registration, deregistration, heartbeats |
+| MEMORY | `memory.episode.>`, `memory.dlq.>` | limits | 365d | Durable memory episodes + per-project DLQ; consumed by the fleet-memory relay → Postgres (write-path v2) |
 
 ### Project Streams
 

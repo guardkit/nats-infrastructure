@@ -67,6 +67,17 @@
       "description": "Agent registration, deregistration, heartbeats"
     },
     {
+      "name": "MEMORY",
+      "subjects": ["memory.episode.>", "memory.dlq.>"],
+      "retention": "limits",
+      "max_age": "365d",
+      "max_msgs": 100000,
+      "storage": "file",
+      "replicas": 1,
+      "scope": "core",
+      "description": "Durable memory episodes (canonical raw record) on memory.episode.> + per-project DLQ on memory.dlq.>; consumed by the fleet-memory relay -> Postgres (FEAT-MEM-04, write-path v2)"
+    },
+    {
       "name": "FINPROXY",
       "subjects": ["finproxy.>"],
       "retention": "work",
