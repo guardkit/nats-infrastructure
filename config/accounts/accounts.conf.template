@@ -46,6 +46,23 @@ accounts {
                     subscribe: ">"
                 }
             }
+            {
+                # forge service identity — dedicated NATS user so the forge runtime/CLI
+                # no longer ride on a human principal's (rich's) credentials; it can be
+                # rotated/revoked/audited independently. Full pub/sub WITHIN the APPMILLA
+                # account (same as rich/james) — the account is the privilege boundary
+                # (FINPROXY/SYS are isolated). Subject-level scoping (pipeline.>/runbook.>/
+                # agents.>/fleet.> + $JS.API.>/$KV.>) is intentionally NOT used here: the
+                # entrypoint's blanket `envsubst` clobbers NATS system subjects ($JS/$KV ->
+                # empty), so scoping would require restricting envsubst to the *_PASSWORD
+                # vars and rebuilding the image. Tracked as a future hardening.
+                user: "forge"
+                password: "${FORGE_NATS_PASSWORD}"
+                permissions: {
+                    publish: ">"
+                    subscribe: ">"
+                }
+            }
         ]
     }
 
