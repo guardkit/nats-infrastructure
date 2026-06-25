@@ -18,10 +18,16 @@
 #     regenerates the processed config (idempotent).
 #
 # Required environment variables:
-#   RICH_NATS_PASSWORD   — Rich's APPMILLA account password
-#   JAMES_NATS_PASSWORD  — James's APPMILLA account password
-#   MARK_NATS_PASSWORD   — Mark's FINPROXY account password
-#   ADMIN_NATS_PASSWORD  — SYS admin account password
+#   Core accounts — validated up-front by REQUIRED_VARS (clear "missing var" error):
+#     RICH_NATS_PASSWORD          — Rich's APPMILLA account password
+#     JAMES_NATS_PASSWORD         — James's APPMILLA account password
+#     MARK_NATS_PASSWORD          — Mark's FINPROXY account password
+#     ADMIN_NATS_PASSWORD         — SYS admin account password
+#   Service identities — referenced by the template and substituted by envsubst
+#   below; a missing value yields password: "" which the post-substitution guard
+#   rejects, so the broker still refuses to start without them:
+#     FORGE_NATS_PASSWORD         — forge service identity (APPMILLA) password
+#     FLEET_MEMORY_NATS_PASSWORD  — fleet-memory relay service identity (APPMILLA)
 #
 # Usage (Docker):
 #   ENTRYPOINT ["scripts/docker-entrypoint.sh"]
@@ -101,7 +107,7 @@ for template in "${TEMPLATE_DIR}"/*.conf.template; do
     # producing invalid subjects like `.API.>`. Naming the allowed vars leaves
     # every other `$`-token (NATS subjects) untouched, which is what lets
     # accounts use subject-scoped permissions including JetStream/KV subjects.
-    envsubst '${RICH_NATS_PASSWORD} ${JAMES_NATS_PASSWORD} ${MARK_NATS_PASSWORD} ${ADMIN_NATS_PASSWORD} ${FORGE_NATS_PASSWORD}' < "$template" > "$output"
+    envsubst '${RICH_NATS_PASSWORD} ${JAMES_NATS_PASSWORD} ${MARK_NATS_PASSWORD} ${ADMIN_NATS_PASSWORD} ${FORGE_NATS_PASSWORD} ${FLEET_MEMORY_NATS_PASSWORD}' < "$template" > "$output"
     processed_any=1
     echo "Processed: ${template} -> ${output}"
 done

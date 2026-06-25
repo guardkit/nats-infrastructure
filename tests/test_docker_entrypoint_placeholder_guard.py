@@ -145,8 +145,11 @@ class TestEntrypointIdempotent:
     def test_envsubst_runs_in_main_script_body(self, entrypoint_text: str) -> None:
         # The envsubst loop must appear unconditionally in the main script
         # body (no `if first-run` guard), so it re-executes on every restart.
-        assert "envsubst <" in entrypoint_text, (
-            "Entrypoint must re-run envsubst on every start for idempotence"
+        assert re.search(
+            r"envsubst\s+'[^']*'\s*<\s*\"\$template\"", entrypoint_text
+        ), (
+            "Entrypoint must re-run envsubst (allow-listed vars, redirected from "
+            '"$template") on every start for idempotence'
         )
         # Must NOT short-circuit on an existing processed file
         assert not re.search(
@@ -385,18 +388,22 @@ class TestEntrypointBehaviourPostSubstitutionGuard:
     def test_rejects_empty_password_from_missing_var(
         self, entrypoint_sandbox: dict
     ) -> None:
-        # envsubst silently substitutes a missing env var with an empty
-        # string, producing password: "". The guard must treat that as a
-        # failure — otherwise the server would start with an open account.
+        # envsubst silently substitutes an allow-listed-but-unset env var with
+        # an empty string, producing password: "". The guard must treat that as
+        # a failure — otherwise the server would start with an open account.
+        # FORGE_NATS_PASSWORD is in the entrypoint's envsubst allow-list but is
+        # intentionally NOT provided below, so it substitutes to "" (a var that
+        # is NOT in the allow-list would instead survive as a literal ${VAR} and
+        # trip the separate unsubstituted-reference guard).
         template = entrypoint_sandbox["template_dir"] / "accounts.conf.template"
         template.write_text(
             'accounts {\n'
-            '    APPMILLA { users: [ { user: "rich", password: "${UNKNOWN_VAR}" } ] }\n'
+            '    APPMILLA { users: [ { user: "forge", password: "${FORGE_NATS_PASSWORD}" } ] }\n'
             '}\n',
             encoding="utf-8",
         )
         env = {var: "real-password-abc-77" for var in REQUIRED_VARS}
-        env.pop("UNKNOWN_VAR", None)
+        env.pop("FORGE_NATS_PASSWORD", None)
 
         result = _run_entrypoint(entrypoint_sandbox, env=env)
         assert result.returncode != 0, (

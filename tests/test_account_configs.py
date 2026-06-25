@@ -54,8 +54,12 @@ def _extract_account_block(template_text: str, account_name: str) -> str:
     everything from the account name through its closing brace, including
     all nested blocks.
     """
-    # Strip ${VAR} references so braces inside them don't confuse counting
-    cleaned = re.sub(r"\$\{[^}]+\}", "PLACEHOLDER", template_text)
+    # Mask ${VAR} references so braces inside them don't confuse counting.
+    # The mask MUST be the same length as what it replaces: the brace scan
+    # runs over `cleaned` but the final slice indexes back into the original
+    # `template_text` (see below), so any length change would drift the offsets
+    # and truncate the returned block.
+    cleaned = re.sub(r"\$\{[^}]+\}", lambda m: "X" * len(m.group(0)), template_text)
     pattern = re.compile(rf"\b{account_name}\s*\{{")
     match = pattern.search(cleaned)
     if not match:

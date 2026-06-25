@@ -75,6 +75,24 @@ accounts {
                     ]
                 }
             }
+            {
+                # fleet-memory relay service identity (FEAT-MEM-04): consumes
+                # memory.episode.> via a durable pull consumer ("fleet-memory-relay")
+                # and writes to Postgres; republishes poison episodes to memory.dlq.>.
+                # Subject-scoped (least privilege) to the JetStream API/ACK and
+                # request-reply inboxes a pull consumer needs. Survives envsubst
+                # because the entrypoint only substitutes the *_PASSWORD vars,
+                # leaving the $JS system subjects intact.
+                #   consumes:  memory.episode.>  (durable pull "fleet-memory-relay")
+                #   publishes: memory.dlq.>
+                #   jetstream: $JS.> (API + ACK)   replies: _INBOX.>
+                user: "fleet-memory"
+                password: "${FLEET_MEMORY_NATS_PASSWORD}"
+                permissions: {
+                    publish: [ "memory.dlq.>", "$JS.>", "_INBOX.>" ]
+                    subscribe: [ "memory.episode.>", "$JS.>", "_INBOX.>" ]
+                }
+            }
         ]
     }
 
