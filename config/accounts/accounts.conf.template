@@ -93,6 +93,24 @@ accounts {
                     subscribe: [ "memory.episode.>", "$JS.>", "_INBOX.>" ]
                 }
             }
+            {
+                # guardkit harvest publisher identity (P4): publishes memory episodes
+                # to memory.episode.{project_id}.{episode_type} via
+                # nats_core.NATSClient.publish_episode (the first real producer onto the
+                # write path). Least privilege — it is a PUBLISHER, so it gets publish on
+                # memory.episode.> plus a reply inbox for JetStream PubAcks, but
+                # deliberately NO $JS.> (no JetStream admin: it must not create/purge
+                # streams or consumers) and NO subscribe on memory.episode.> (it does not
+                # consume — that is the fleet-memory relay's job).
+                #   publishes: memory.episode.>
+                #   replies:   _INBOX.>  (PubAck on js.publish / request-reply)
+                user: "guardkit"
+                password: "${GUARDKIT_NATS_PASSWORD}"
+                permissions: {
+                    publish:   [ "memory.episode.>" ]
+                    subscribe: [ "_INBOX.>" ]
+                }
+            }
         ]
     }
 
