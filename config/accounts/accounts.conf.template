@@ -111,6 +111,34 @@ accounts {
                     subscribe: [ "_INBOX.>" ]
                 }
             }
+            {
+                # jarvis ship's-computer service identity — dedicated NATS user so the
+                # jarvis router no longer rides on a human principal's credentials; it
+                # can be rotated/revoked/audited independently.
+                #
+                # Subject-scoped (least privilege) to jarvis's own family plus the
+                # families it orchestrates: intent classification/dispatch on jarvis.>,
+                # agent commands/results on agents.>, registration/heartbeats on
+                # fleet.>, outbound notifications on notifications.>. JetStream/KV
+                # subjects survive substitution because the entrypoint restricts
+                # `envsubst` to the *_PASSWORD vars.
+                #   produces:  jarvis.>  agents.>  fleet.>  notifications.>
+                #   consumes:  jarvis.>, agents.>, fleet.> (register/heartbeat)
+                #   kv:        $KV.>  (jarvis-session, agent-registry, agent-status)
+                #   jetstream: $JS.>  (API + ACK)   replies: _INBOX.>
+                user: "jarvis"
+                password: "${JARVIS_NATS_PASSWORD}"
+                permissions: {
+                    publish: [
+                        "jarvis.>", "agents.>", "fleet.>", "notifications.>",
+                        "$JS.>", "$KV.>", "_INBOX.>"
+                    ]
+                    subscribe: [
+                        "jarvis.>", "agents.>", "fleet.>", "notifications.>",
+                        "$JS.>", "$KV.>", "_INBOX.>"
+                    ]
+                }
+            }
         ]
     }
 
