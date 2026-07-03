@@ -123,6 +123,9 @@ accounts {
                 # subjects survive substitution because the entrypoint restricts
                 # `envsubst` to the *_PASSWORD vars.
                 #   produces:  jarvis.>  agents.>  fleet.>  notifications.>
+                #              memory.episode.jarvis.>  (memory episodes, own
+                #              project only — publisher onto the write path;
+                #              PubAck rides the existing $JS.> / _INBOX.> grants)
                 #   consumes:  jarvis.>, agents.>, fleet.> (register/heartbeat)
                 #   kv:        $KV.>  (jarvis-session, agent-registry, agent-status)
                 #   jetstream: $JS.>  (API + ACK)   replies: _INBOX.>
@@ -131,6 +134,7 @@ accounts {
                 permissions: {
                     publish: [
                         "jarvis.>", "agents.>", "fleet.>", "notifications.>",
+                        "memory.episode.jarvis.>",
                         "$JS.>", "$KV.>", "_INBOX.>"
                     ]
                     subscribe: [
