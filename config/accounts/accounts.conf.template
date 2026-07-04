@@ -126,7 +126,14 @@ accounts {
                 #              memory.episode.jarvis.>  (memory episodes, own
                 #              project only — publisher onto the write path;
                 #              PubAck rides the existing $JS.> / _INBOX.> grants)
+                #              pipeline.build-queued.>  (forge build intake — queue_build
+                #              publishes BuildQueuedPayload; added 2026-07-04 after the
+                #              FEAT-UBS-003 live checkpoint hit a silent publish drop /
+                #              PubAck timeout because this grant was missing)
                 #   consumes:  jarvis.>, agents.>, fleet.> (register/heartbeat)
+                #              pipeline.>  (forge lifecycle envelopes via the PIPELINE
+                #              JetStream consumer; delivery rides _INBOX.> but the grant
+                #              records intent and permits plain-NATS debug tails)
                 #   kv:        $KV.>  (jarvis-session, agent-registry, agent-status)
                 #   jetstream: $JS.>  (API + ACK)   replies: _INBOX.>
                 user: "jarvis"
@@ -135,10 +142,12 @@ accounts {
                     publish: [
                         "jarvis.>", "agents.>", "fleet.>", "notifications.>",
                         "memory.episode.jarvis.>",
+                        "pipeline.build-queued.>",
                         "$JS.>", "$KV.>", "_INBOX.>"
                     ]
                     subscribe: [
                         "jarvis.>", "agents.>", "fleet.>", "notifications.>",
+                        "pipeline.>",
                         "$JS.>", "$KV.>", "_INBOX.>"
                     ]
                 }
