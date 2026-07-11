@@ -67,6 +67,13 @@ accounts {
                 permissions: {
                     publish: [
                         "pipeline.>", "runbook.>", "agents.>", "fleet.>",
+                        # Mode P planning notification return channel (FEAT-SPL-003):
+                        # forge core-publishes NotificationPayload to
+                        # jarvis.notification.slack; jarvis consumes it and renders
+                        # to the operator's phone. Added 2026-07-11 (Session-A
+                        # follow-up) — surfaced as "permissions violation for publish
+                        # to jarvis.notification.slack" during the MP-010 re-validation.
+                        "jarvis.notification.>",
                         "$JS.>", "$KV.>", "_INBOX.>"
                     ]
                     subscribe: [
