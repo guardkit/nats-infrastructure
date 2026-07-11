@@ -130,6 +130,10 @@ accounts {
                 #              publishes BuildQueuedPayload; added 2026-07-04 after the
                 #              FEAT-UBS-003 live checkpoint hit a silent publish drop /
                 #              PubAck timeout because this grant was missing)
+                #              pipeline.planning-queued.>  (Mode P planning intake —
+                #              FEAT-SPL-001 slack_planning_intake publishes PlanningQueuedPayload;
+                #              added 2026-07-11 (Session A / J04) after the first live planning
+                #              post hit the SAME missing-grant class as build-queued above)
                 #   consumes:  jarvis.>, agents.>, fleet.> (register/heartbeat)
                 #              pipeline.>  (forge lifecycle envelopes via the PIPELINE
                 #              JetStream consumer; delivery rides _INBOX.> but the grant
@@ -143,6 +147,7 @@ accounts {
                         "jarvis.>", "agents.>", "fleet.>", "notifications.>",
                         "memory.episode.jarvis.>",
                         "pipeline.build-queued.>",
+                        "pipeline.planning-queued.>",
                         "$JS.>", "$KV.>", "_INBOX.>"
                     ]
                     subscribe: [
