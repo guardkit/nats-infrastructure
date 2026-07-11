@@ -202,8 +202,8 @@ echo "--- Check 4: Account Authentication (Optional) ---"
 if has_command nats; then
     # Test APPMILLA account (rich user) if credentials are available
     if [ -n "${RICH_NATS_PASSWORD:-}" ]; then
-        nats_pub_result=$(nats pub test.verify "verify" \
-            --user rich --password "${RICH_NATS_PASSWORD}" \
+        nats_pub_result=$(NATS_USER=rich NATS_PASSWORD="${RICH_NATS_PASSWORD}" \
+            nats pub test.verify "verify" \
             --server "nats://localhost:4222" \
             --timeout 3s 2>&1) || true
 
@@ -218,8 +218,8 @@ if has_command nats; then
 
     # Test FINPROXY account (mark user) if credentials are available
     if [ -n "${MARK_NATS_PASSWORD:-}" ]; then
-        nats_sub_result=$(nats pub finproxy.test.verify "verify" \
-            --user mark --password "${MARK_NATS_PASSWORD}" \
+        nats_sub_result=$(NATS_USER=mark NATS_PASSWORD="${MARK_NATS_PASSWORD}" \
+            nats pub finproxy.test.verify "verify" \
             --server "nats://localhost:4222" \
             --timeout 3s 2>&1) || true
 
@@ -247,8 +247,8 @@ echo ""
 echo "--- Check 4b: Placeholder Credentials Rejected ---"
 
 if has_command nats; then
-    placeholder_auth=$(nats pub test.placeholder "placeholder-should-fail" \
-        --user rich --password "changeme" \
+    placeholder_auth=$(NATS_USER=rich NATS_PASSWORD="changeme" \
+        nats pub test.placeholder "placeholder-should-fail" \
         --server "nats://localhost:4222" \
         --timeout 3s 2>&1) || true
 
