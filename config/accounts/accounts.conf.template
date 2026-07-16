@@ -74,6 +74,13 @@ accounts {
                         # follow-up) — surfaced as "permissions violation for publish
                         # to jarvis.notification.slack" during the MP-010 re-validation.
                         "jarvis.notification.>",
+                        # WS2-B8 deploy domain (C4 first live fire, 2026-07-16):
+                        # the DeployStageRunner publishes DeployQueued/Started/
+                        # Completed/Failed/Reverted + QAVerdict/LiveGateResult
+                        # receipts on deploy.> (the dashboard's G-01 projector
+                        # consumes them). Surfaced live as "permissions violation
+                        # for publish to deploy.queued.<id>" at the C4 window.
+                        "deploy.>",
                         "$JS.>", "$KV.>", "_INBOX.>"
                     ]
                     subscribe: [
