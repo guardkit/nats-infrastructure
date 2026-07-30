@@ -1,0 +1,32 @@
+# =============================================================================
+# check-escrow-coverage.timer.template — DF-022 S3 daily trigger for the
+# escrow recipient-coverage check (pairs with check-escrow-coverage.service).
+#
+# SPEC: ai-transition docs/ways-of-working/secrets-close-out-and-rotation-handoff.md
+#       §3-S3 (daily, on GB10 + Node B). Install runbook: the register page
+#       ai-transition docs/secrets-register/PAGE-age-keys.md §4a.
+#
+# INSTANTIATION IS A VERBATIM COPY — no envsubst step (per-box variance lives in
+# the service's %h specifiers). Install as
+#   ~/.config/systemd/user/check-escrow-coverage.timer
+# then: systemctl --user daemon-reload && systemctl --user enable --now
+# check-escrow-coverage.timer. The timer needs lingering to fire while the user
+# is logged out: loginctl show-user "$USER" -p Linger must say Linger=yes.
+#
+# Persistent=true: a run missed while the box was down (GB10 reboots) fires
+# once at the next timer load instead of silently skipping the day.
+# RandomizedDelaySec keeps the check off the midnight thundering herd; the
+# check is sub-second, so placement within the window is immaterial.
+# =============================================================================
+
+[Unit]
+Description=Daily DF-022 escrow recipient-coverage check
+
+[Timer]
+OnCalendar=daily
+Persistent=true
+RandomizedDelaySec=15m
+Unit=check-escrow-coverage.service
+
+[Install]
+WantedBy=timers.target

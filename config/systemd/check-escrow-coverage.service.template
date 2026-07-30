@@ -1,0 +1,52 @@
+# =============================================================================
+# check-escrow-coverage.service.template — DF-022 S3 periodic recipient-coverage
+# runner (systemd --user ONESHOT service; paired with the .timer template).
+#
+# SPEC: ai-transition docs/ways-of-working/secrets-close-out-and-rotation-handoff.md
+#       §3-S3 + §4 "S3 coach" (daily · refs-only output to the journal · a RED
+#       exits nonzero so it is visible in `systemctl --user list-timers`/status ·
+#       minimal PATH). Install runbook: the register page
+#       ai-transition docs/secrets-register/PAGE-age-keys.md §4a.
+#
+# INSTANTIATION IS A VERBATIM COPY — no envsubst step. Per-box variance is
+# carried entirely by systemd `%h` (user home) specifiers: on GB10 and Node B
+# alike the check script installs to ~/.local/bin and the secrets root is
+# ~/.config/fleet-secrets, so the SAME bytes serve both boxes. Install as
+#   ~/.config/systemd/user/check-escrow-coverage.service
+# (the `.template` suffix stripped; see PAGE-age-keys.md §4a for the full steps).
+#
+# REFS-ONLY / READ-ONLY: check-escrow-coverage.sh reads sops METADATA only
+# (recipient public keys — register data, never secrets), never decrypts, and
+# prints filenames + counts + a state word. This unit adds no environment beyond
+# the pinned PATH — no credential ever belongs in this file.
+#
+# MINIMAL-PATH LAW: PATH is pinned to /usr/bin:/bin below, deliberately
+# EXCLUDING ~/.local/bin. The check script is grep/find/coreutils-only and
+# invokes NO sops binary; if a future revision of the check ever shells out to
+# sops (or any other ~/.local/bin tool), it MUST use the absolute path
+# (%h/.local/bin/sops) — the timer's environment will not resolve it by name
+# (the same absolute-path law as the NAS wrappers, PAGE-age-keys.md §1a).
+#
+# RED VISIBILITY: the check exits 1 on a coverage RED (and 2 on a root/usage
+# error); Type=oneshot turns any nonzero exit into a `failed` unit state —
+# visible via `systemctl --user --failed`, `systemctl --user status
+# check-escrow-coverage.service`, and the timer's LAST/RESULT columns. The
+# nonzero exit IS the alarm; nothing here masks it.
+# =============================================================================
+
+[Unit]
+Description=DF-022 escrow recipient-coverage check (refs-only, read-only)
+
+[Service]
+Type=oneshot
+# Minimal PATH (see MINIMAL-PATH LAW above). The only Environment= line this
+# unit may ever carry — no credentials, no secrets-root overrides.
+Environment=PATH=/usr/bin:/bin
+# Explicit root argument (matches the script's default, but the unit states it
+# so the audited surface is deterministic under the minimal environment).
+ExecStart=%h/.local/bin/check-escrow-coverage.sh %h/.config/fleet-secrets
+# Stable journal tag: journalctl --user -t check-escrow-coverage
+SyslogIdentifier=check-escrow-coverage
+
+# NO [Install] section: this service is activated by check-escrow-coverage.timer
+# only — `systemctl --user enable` on the service itself is meant to fail.
