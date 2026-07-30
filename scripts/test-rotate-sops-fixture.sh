@@ -39,6 +39,14 @@
 #        phase with the authority file still untouched
 #   (6b) trap proof: a failing `sops -e` leaves NO plaintext window in /run/user
 #        and does not half-write the destination
+#   (6c) two-phase safety, DRIFTED DSN: a url row whose userinfo user is NOT this
+#        account aborts in the PLAN phase — authority AND every other consumer
+#        byte-identical (the half-applied-rotation hole)
+#   (6d) two-phase safety, NON-DSN value: a url row whose value is not a
+#        user:pw@host DSN aborts in the PLAN phase, same untouched estate
+#   (6e) source-selection fence: `--source auto` with a plaintext .env present
+#        must still choose the SOPS authority (DF-022 — plaintext must never
+#        silently divert a rotation past the whole encrypted estate)
 #   (7)  zero plaintext at rest: no secret value anywhere under the fixture root,
 #        every file still sops-ciphertext, no /run/user temp survives
 #   (8)  `bash -x` (set -x) audit: no secret value in the trace
@@ -152,8 +160,13 @@ ALL_VALUES=("${OLD_RICH}" "${NEW_RICH}" "${OLD_FM}" "${NEW_FM}" "${OLD_JARVIS}" 
             "${NEW_JARVIS}" "${OLD_FORGE}" "${OLD_ADMIN}" "${OLD_GUARDKIT}")
 
 # ---------------------------------------------------------------------------
-# Build a synthetic secrets root. $1 = path · $2 = "ok" | "break-req"
-# (break-req omits NATS_PASSWORD from the REQUIRED specialist consumer file).
+# Build a synthetic secrets root. $1 = path · $2 = variant:
+#   ok              — the healthy estate
+#   break-req       — omits NATS_PASSWORD from the REQUIRED specialist file
+#   break-url-user  — fleet-memory-root's DSN carries a DIFFERENT nats user
+#                     (the plausible stale/divergent copy: that file is the
+#                     "TWICE-STALE" row in the CONSUMERS map)
+#   break-url-shape — fleet-memory-root's value is not a DSN at all
 # Per-PREFIX creation rules with NO catch-all: encryption of a /run/user temp
 # can therefore only succeed if the script's --filename-override really maps to
 # the DESTINATION path (that is the point of the shape).
@@ -175,8 +188,17 @@ creation_rules:
 EOF
     umask 077
 
-    # Broker authority — all eight, no inline comments (exec-env parser law).
+    # Broker authority — all eight. FIDELITY: the REAL nats/broker.enc.env (and
+    # forge-nats / jarvis / specialist-agent) carry WHOLE-LINE `#` comments,
+    # including ones containing `|` and `=`. The exec-env parser law bans INLINE
+    # (trailing) comments on a value line — it does not ban comment lines — so
+    # the fixture must meet the shape S2 will actually meet: the rewrite must
+    # round-trip every comment byte-exactly.
     {
+        printf '# nats-infrastructure — broker account passwords (DF-022 sops authority)\n'
+        printf '# NATS Account Passwords\n'
+        printf '# Account: SYS | User: admin | consumed by: docker-entrypoint.sh envsubst\n'
+        printf '# rendered as KEY=VALUE pairs into accounts.conf; no inline comments\n'
         printf 'ADMIN_NATS_PASSWORD=%s\n' "${OLD_ADMIN}"
         printf 'RICH_NATS_PASSWORD=%s\n' "${OLD_RICH}"
         printf 'JAMES_NATS_PASSWORD=%s\n' "$(gen)"
@@ -184,6 +206,7 @@ EOF
         printf 'FORGE_NATS_PASSWORD=%s\n' "${OLD_FORGE}"
         printf 'FLEET_MEMORY_NATS_PASSWORD=%s\n' "${OLD_FM}"
         printf 'GUARDKIT_NATS_PASSWORD=%s\n' "${OLD_GUARDKIT}"
+        printf '# Account: JARVIS | User: jarvis | systemd --user consumer\n'
         printf 'JARVIS_NATS_PASSWORD=%s\n' "${OLD_JARVIS}"
     } > "${root}/nats/broker.enc.env"
 
@@ -206,8 +229,19 @@ EOF
         "${OLD_FORGE}" > "${root}/nats/forge-nats.enc.env"
     printf 'FLEET_MEMORY_NATS_URL=nats://fleet-memory:%s@127.0.0.1:4222\nFLEET_MEMORY_PG_DSN=postgresql://fm:fixturepw@127.0.0.1:5432/fm\n' \
         "${OLD_FM}" > "${root}/fleet-memory-pg/relay-env-deploy.enc.env"
-    printf 'FLEET_MEMORY_NATS_URL=nats://fleet-memory:%s@127.0.0.1:4222\nFLEET_MEMORY_EMBED_URL=http://127.0.0.1:8080\n' \
-        "${OLD_FM}" > "${root}/fleet-memory-pg/fleet-memory-root.enc.env"
+    case "${variant}" in
+        break-url-user)
+            # A plausible divergence: the TWICE-STALE copy points at another user.
+            printf 'FLEET_MEMORY_NATS_URL=nats://someoneelse:%s@127.0.0.1:4222\nFLEET_MEMORY_EMBED_URL=http://127.0.0.1:8080\n' \
+                "${OLD_FM}" > "${root}/fleet-memory-pg/fleet-memory-root.enc.env" ;;
+        break-url-shape)
+            # Present, required, but not a DSN at all (a host:port was recorded).
+            printf 'FLEET_MEMORY_NATS_URL=127.0.0.1:4222\nFLEET_MEMORY_EMBED_URL=http://127.0.0.1:8080\n' \
+                > "${root}/fleet-memory-pg/fleet-memory-root.enc.env" ;;
+        *)
+            printf 'FLEET_MEMORY_NATS_URL=nats://fleet-memory:%s@127.0.0.1:4222\nFLEET_MEMORY_EMBED_URL=http://127.0.0.1:8080\n' \
+                "${OLD_FM}" > "${root}/fleet-memory-pg/fleet-memory-root.enc.env" ;;
+    esac
     # guardkit copy: URL member for FLEET_MEMORY, and NO GUARDKIT_NATS_PASSWORD
     # (PAGE-nats §8 DISCOVERY — the 'opt' SKIP path).
     printf 'FLEET_MEMORY_NATS_URL=nats://fleet-memory:%s@127.0.0.1:4222\nGOOGLE_API_KEY=fixture-dead\n' \
@@ -264,11 +298,16 @@ fi
 # ---------------------------------------------------------------------------
 echo ""
 echo "--- (12) flag fences ---"
+# --secrets-root is passed even here: these cases are SUPPOSED to die in the
+# arg-validation block before any source resolution, but isolation from the real
+# root must be by CONSTRUCTION, not by that ordering happening to hold.
 fence_rc=0
-printf '%s\n\n' "$(gen)" | "${ROTATE}" --account RICH --live >/dev/null 2>&1 || fence_rc=$?
+printf '%s\n\n' "$(gen)" | "${ROTATE}" --secrets-root "${ROOT}" --sops-bin "${SOPS_BIN}" \
+    --account RICH --live >/dev/null 2>&1 || fence_rc=$?
 nchk "${fence_rc}" "--live without --container is refused" "--live without --container was accepted"
 fence_rc=0
-printf '%s\n\n' "$(gen)" | "${ROTATE}" --account RICH --container some-box >/dev/null 2>&1 || fence_rc=$?
+printf '%s\n\n' "$(gen)" | "${ROTATE}" --secrets-root "${ROOT}" --sops-bin "${SOPS_BIN}" \
+    --account RICH --container some-box >/dev/null 2>&1 || fence_rc=$?
 nchk "${fence_rc}" "--container without --live is refused" "--container without --live was accepted"
 
 # ---------------------------------------------------------------------------
@@ -322,6 +361,11 @@ fi
 echo ""
 echo "--- (2) EXECUTE RICH: old -> new across authority + consumers ---"
 EXECLOG="${WORK}/exec-rich.log"
+# Fidelity proof: EVERY line of the authority except the rotated one must survive
+# byte-exactly — comment lines included, and the fixture's comments carry `|` and
+# `=` exactly as the real broker.enc.env does. Compared as a hash so no value is
+# ever printed.
+AUTH_SANS_BEFORE="$(dec "${ROOT}" nats/broker.enc.env | grep -v '^RICH_NATS_PASSWORD=' | sha256sum)"
 exec_rc=0
 run_rotate "${EXECLOG}" "${NEW_RICH}" "${OLD_RICH}" --account RICH --execute || exec_rc=$?
 chk "${exec_rc}" "RICH rotation exited 0" "RICH rotation exited ${exec_rc}"
@@ -342,6 +386,15 @@ same "$(val_of "${ROOT}" nats/specialist-agent.enc.env OPENAI_API_KEY)" "sk-fixt
     "passenger key in the same file untouched" "passenger key changed"
 same "$(val_of "${ROOT}" nats/broker.enc.env ADMIN_NATS_PASSWORD)" "${OLD_ADMIN}" \
     "other broker members untouched (ADMIN)" "another broker member changed"
+same "$(dec "${ROOT}" nats/broker.enc.env | grep -v '^RICH_NATS_PASSWORD=' | sha256sum)" \
+    "${AUTH_SANS_BEFORE}" \
+    "authority round-trips byte-exactly except the rotated line (comment lines with | and = survive)" \
+    "the rewrite disturbed a non-target line of the authority (comments?)"
+if dec "${ROOT}" nats/broker.enc.env | grep -Fq '# Account: SYS | User: admin'; then
+    pass "the fixture's real-shape comment line is still present after the rewrite"
+else
+    fail "a comment line was lost by the rewrite — the fixture no longer matches the real file shape"
+fi
 assert_absent_under "${ROOT}" "OLD rich value" "${OLD_RICH}"
 assert_absent_under "${ROOT}" "NEW rich value" "${NEW_RICH}"
 
@@ -475,18 +528,144 @@ chk "${encfail_left}" "EXIT trap shredded the plaintext window on the failure pa
     "${encfail_left} plaintext window(s) survived a failed encrypt"
 
 # ---------------------------------------------------------------------------
+# (6c)+(6d) two-phase safety for URL rows — the half-applied-rotation hole.
+# A url row's DSN parse + userinfo-user match MUST happen in the PLAN phase. If
+# it happens only at apply time, the authority is already re-encrypted and the
+# earlier consumer rows already written when the drifted row aborts — exactly the
+# state two-phase exists to prevent. FLEET_MEMORY is the case that matters: three
+# url rows, and the drifted one (fleet-memory-root) is NOT first in the map.
+# ---------------------------------------------------------------------------
+url_drift_case() {  # $1 variant · $2 label
+    local variant="$1" label="$2" root log rc before
+    root="${WORK}/fleet-secrets-${variant}"
+    log="${WORK}/exec-${variant}.log"
+    make_root "${root}" "${variant}"
+    before="$(hash_root "${root}")"
+    rc=0
+    printf '%s\n%s\n' "$(gen)" "${OLD_FM}" | \
+        "${ROTATE}" --secrets-root "${root}" --sops-bin "${SOPS_BIN}" --source sops \
+        --register-page "${REGISTER_PAGE}" --account FLEET_MEMORY --execute > "${log}" 2>&1 || rc=$?
+    nchk "${rc}" "${label}: aborts non-zero (rc ${rc})" "${label}: the drifted estate was accepted"
+    has "${log}" "R4 PLAN FAIL" "${label}: abort is reported as an R4 PLAN failure" \
+        "${label}: aborted somewhere OTHER than the plan phase (half-applied risk)"
+    if grep -Fq "GATE R1 PASS" "${log}"; then
+        fail "${label}: the authority was re-encrypted BEFORE the drift was caught"
+    else
+        pass "${label}: no GATE R1 write was attempted"
+    fi
+    if grep -Fq "R4 SYNCED + VERIFIED" "${log}"; then
+        fail "${label}: a consumer file was written BEFORE the drift was caught"
+    else
+        pass "${label}: no consumer file was written"
+    fi
+    same "$(hash_root "${root}")" "${before}" \
+        "${label}: TWO-PHASE PROVEN — authority AND every consumer byte-identical" \
+        "${label}: the estate was half-applied (files changed before the abort)"
+}
+echo ""
+echo "--- (6c) two-phase safety: url row carrying a DIFFERENT nats user ---"
+url_drift_case break-url-user "drifted DSN user"
+echo ""
+echo "--- (6d) two-phase safety: url row whose value is not a DSN ---"
+url_drift_case break-url-shape "non-DSN url value"
+
+# ---------------------------------------------------------------------------
+# (6e) source selection: a stray plaintext .env must NOT divert the rotation.
+# DF-022 retired the broker's plaintext .env; `--source auto` must therefore
+# choose the SOPS authority whenever one exists. The old plaintext-preferred
+# resolution exited 0 with a success banner having touched NOTHING encrypted.
+# ---------------------------------------------------------------------------
+echo ""
+echo "--- (6e) --source auto is SOPS-preferred (a stray .env cannot divert it) ---"
+ROOT5="${WORK}/fleet-secrets-auto"
+make_root "${ROOT5}" ok
+STRAY_ENV="${WORK}/stray.env"
+printf 'RICH_NATS_PASSWORD=%s\n' "$(gen)" > "${STRAY_ENV}"
+chmod 600 "${STRAY_ENV}"
+AUTOLOG="${WORK}/exec-auto.log"
+AUTO_NEW="$(gen)"
+auto_rc=0
+printf '%s\n%s\n' "${AUTO_NEW}" "${OLD_RICH}" | \
+    "${ROTATE}" --secrets-root "${ROOT5}" --sops-bin "${SOPS_BIN}" --env-file "${STRAY_ENV}" \
+    --register-page "${REGISTER_PAGE}" --account RICH --execute > "${AUTOLOG}" 2>&1 || auto_rc=$?
+chk "${auto_rc}" "auto-source run exited 0" "auto-source run exited ${auto_rc}"
+has "${AUTOLOG}" "source    : sops" "--source auto chose the SOPS authority despite a plaintext .env" \
+    "--source auto fell through to plaintext and skipped the whole sops estate"
+same "$(val_of "${ROOT5}" nats/broker.enc.env RICH_NATS_PASSWORD)" "${AUTO_NEW}" \
+    "the encrypted authority really took the new value under auto" \
+    "the encrypted authority was left stale under auto"
+same "$(val_of "${ROOT5}" nats/specialist-agent.enc.env NATS_PASSWORD)" "${AUTO_NEW}" \
+    "consumer re-sync still ran under auto" "consumers were skipped under auto"
+if grep -Fq -- "${AUTO_NEW}" "${STRAY_ENV}"; then
+    fail "the stray plaintext .env was written by the auto run"
+else
+    pass "the stray plaintext .env was NOT written (the sops authority is the target)"
+fi
+# The plaintext branch itself must still work when it is asked for explicitly,
+# and must leave NO temp beside the env-file (RUNTIME PLAINTEXT LAW: the working
+# copy lives on the tmpfs, never in a git work tree).
+PT_ENV="${WORK}/plaintext/.env"
+mkdir -p "${WORK}/plaintext"
+PT_NEW="$(gen)"
+printf 'ADMIN_NATS_PASSWORD=%s\nRICH_NATS_PASSWORD=%s\n' "${OLD_ADMIN}" "${OLD_RICH}" > "${PT_ENV}"
+chmod 644 "${PT_ENV}"
+PTLOG="${WORK}/exec-plaintext.log"
+pt_rc=0
+printf '%s\n%s\n' "${PT_NEW}" "${OLD_RICH}" | \
+    "${ROTATE}" --secrets-root "${ROOT5}" --sops-bin "${SOPS_BIN}" --env-file "${PT_ENV}" \
+    --source plaintext --register-page "${REGISTER_PAGE}" --account RICH --execute \
+    > "${PTLOG}" 2>&1 || pt_rc=$?
+chk "${pt_rc}" "explicit --source plaintext still rotates the env-file" "plaintext run exited ${pt_rc}"
+if grep -Fq -- "${PT_NEW}" "${PT_ENV}"; then
+    pass "plaintext env-file carries the new value"
+else
+    fail "plaintext env-file was not rewritten"
+fi
+has "${PTLOG}" "WARNING: PLAINTEXT SOURCE" "plaintext mode warns that the sops estate is untouched" \
+    "plaintext mode exits successfully with no warning about the skipped sops estate"
+pt_temps="$(find "${WORK}/plaintext" -maxdepth 1 -name '.env.rotate.*' | wc -l)"
+chk "${pt_temps}" "no plaintext temp left beside the env-file" \
+    "${pt_temps} temp(s) left beside the env-file — repo-adjacent plaintext"
+same "$(stat -c '%a' "${PT_ENV}")" "644" "env-file mode preserved" "env-file mode changed"
+# Construction-level proof (no race to win): with the runtime dir ABSENT the
+# plaintext branch must DIE, because its working copy is a /run/user temp. The
+# old branch mktemp'd beside the env-file — inside a git work tree, with the
+# source's mode (e.g. 644) copied onto it — and would have succeeded here.
+PTLOG2="${WORK}/exec-plaintext-notmpfs.log"
+PT_BEFORE="$(sha256sum "${PT_ENV}")"
+pt2_rc=0
+printf '%s\n%s\n' "$(gen)" "${OLD_RICH}" | \
+    "${ROTATE}" --secrets-root "${ROOT5}" --sops-bin "${SOPS_BIN}" --env-file "${PT_ENV}" \
+    --source plaintext --runtime-dir "${WORK}/no-such-tmpfs" --register-page "${REGISTER_PAGE}" \
+    --account RICH --execute > "${PTLOG2}" 2>&1 || pt2_rc=$?
+nchk "${pt2_rc}" "plaintext branch refuses to write with no tmpfs — its working copy IS a /run/user temp" \
+    "plaintext branch wrote without a tmpfs — the working copy is NOT under the runtime dir"
+has "${PTLOG2}" "runtime dir not found" "the refusal names the missing runtime dir" \
+    "the refusal did not come from the RUNTIME PLAINTEXT LAW check"
+same "$(sha256sum "${PT_ENV}")" "${PT_BEFORE}" "env-file untouched by the refused run" \
+    "the env-file was written despite the refusal"
+
+# ---------------------------------------------------------------------------
 # (7) zero plaintext at rest + still-ciphertext + no tmpfs residue.
 # ---------------------------------------------------------------------------
 echo ""
 echo "--- (7) zero plaintext at rest ---"
+# Every fixture root built so far (the drift roots and the auto root included).
+PLAINTEXT_ROOTS=("${ROOT}" "${ROOT2}" "${ROOT4}" "${ROOT5}" \
+                 "${WORK}/fleet-secrets-break-url-user" "${WORK}/fleet-secrets-break-url-shape")
 i=0
+clear_hits=0
 for v in "${ALL_VALUES[@]}"; do
     i=$((i + 1))
-    if grep -rFq -- "${v}" "${ROOT}" "${ROOT2}" "${ROOT4}" 2>/dev/null; then
+    if grep -rFq -- "${v}" "${PLAINTEXT_ROOTS[@]}" 2>/dev/null; then
         fail "value #${i} found in cleartext under a fixture root"
+        clear_hits=$((clear_hits + 1))
     fi
 done
-pass "none of the ${#ALL_VALUES[@]} synthetic values appears in cleartext under any fixture root"
+# Guarded: a genuine leak must NOT also print a contradicting PASS.
+chk "${clear_hits}" \
+    "none of the ${#ALL_VALUES[@]} synthetic values appears in cleartext under any of the ${#PLAINTEXT_ROOTS[@]} fixture roots" \
+    "${clear_hits} synthetic value(s) found in cleartext (see the FAILs above)"
 enc_bad=0
 while IFS= read -r f; do
     grep -q '^sops_version=' "${f}" || enc_bad=$((enc_bad + 1))

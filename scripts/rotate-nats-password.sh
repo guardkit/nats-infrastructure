@@ -71,8 +71,13 @@
 #   Required:
 #     --account <ADMIN|RICH|JAMES|MARK|FORGE|FLEET_MEMORY|GUARDKIT|JARVIS>
 #   Source selection (DF-022 dual mode):
-#     --source <auto|sops|plaintext>   default auto (plaintext if the env-file
-#                                      exists, else sops)
+#     --source <auto|sops|plaintext>   default auto — SOPS-PREFERRED: the
+#                                      encrypted authority wins whenever it
+#                                      exists; plaintext only if there is no
+#                                      enc authority (DF-022 retired the broker's
+#                                      plaintext .env, so a stray/restored one
+#                                      must never divert a rotation). Force
+#                                      plaintext with --source plaintext.
 #     --secrets-root <dir>      out-of-repo sops root
 #                               default /home/richardwoollcott/.config/fleet-secrets
 #     --enc-file <rel>          broker authority file, RELATIVE to the root
@@ -136,7 +141,9 @@ WRONG_PW="definitely-wrong-password-probe"
 
 die() { echo "ERROR: $*" >&2; exit 1; }
 
-usage() { sed -n '2,130p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
+# Print the comment header only — it STOPS at the first non-comment line, so no
+# live code can ever be dumped into --help however the header grows/shrinks.
+usage() { awk 'NR >= 2 { if ($0 !~ /^#/) exit; sub(/^# ?/, ""); print }' "${BASH_SOURCE[0]}"; }
 
 # ---------------------------------------------------------------------------
 # CONSUMERS — the R4 map, mirroring PAGE-nats.md §3 per USER (and the §10 wave
@@ -147,7 +154,10 @@ usage() { sed -n '2,130p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; }
 #                only the userinfo password is swapped, and only when the
 #                userinfo user matches this account's nats user.
 #   req = the key MUST be present (absence aborts BEFORE any write).
-#   opt = a mapped-but-unverified copy; absence is reported SKIP, not a failure.
+#   opt = a mapped-but-unverified copy; ABSENCE is reported SKIP, not a failure.
+#         'opt' covers an absent key ONLY — a key that is present but drifted
+#         (url row whose DSN is unparseable or carries a different user) aborts
+#         in the PLAN phase on every row, req or opt.
 # PERISHABLE — "trust the pages, verify the estate": re-read PAGE-nats §3 and
 # the per-consumer pages' §10 before an attended rotation.
 # Broker-only members (ADMIN / JAMES / MARK) have NO rows: PAGE-nats §8 carries
@@ -212,9 +222,21 @@ else
     [ -z "${CONTAINER}" ] || die "--container given without --live: this run performs NO docker/nats action (drop --container or add --live)"
 fi
 
-# Resolve the dual-mode source: plaintext-preferred, sops-fallback.
+# Resolve the dual-mode source. DF-022 RETIRED the broker's plaintext `.env`, so
+# for THIS script `auto` is SOPS-PREFERRED (the inverse of the generic dual-mode
+# loader): a stray or restored plaintext `.env` must never silently divert a
+# rotation away from the encrypted authority — that would skip the ENTIRE sops
+# estate (authority + every consumer enc file) and still exit 0.
+AUTO_NOTE=""
 if [ "${SOURCE_MODE}" = "auto" ]; then
-    if [ -f "${ENV_FILE}" ]; then SOURCE_MODE="plaintext"; else SOURCE_MODE="sops"; fi
+    if [ -f "${SECRETS_ROOT}/${ENC_FILE}" ]; then
+        SOURCE_MODE="sops"
+    elif [ -f "${ENV_FILE}" ]; then
+        SOURCE_MODE="plaintext"
+        AUTO_NOTE="1"
+    else
+        SOURCE_MODE="sops"   # let the sops preflight say precisely what is missing
+    fi
 fi
 
 # ---------------------------------------------------------------------------
@@ -258,6 +280,17 @@ echo "  host rows : ${THIS_HOST}  (consumer sync: ${CONSUMER_SYNC})"
 echo "  live      : ${LIVE}$([ "${LIVE}" = "true" ] && echo "  container ${CONTAINER} (${RESTART_MODE})" || echo "  (no docker/nats/systemd verb will run)")"
 echo "  write     : $([ "${EXECUTE}" = "true" ] && echo EXECUTE || echo DRY-RUN)"
 echo "======================================="
+if [ "${SOURCE_MODE}" = "plaintext" ]; then
+    echo ""
+    if [ -n "${AUTO_NOTE}" ]; then
+        echo "NOTE: --source auto resolved to PLAINTEXT — there is no encrypted authority at"
+        echo "      ${SECRETS_ROOT}/${ENC_FILE}."
+    fi
+    echo "WARNING: PLAINTEXT SOURCE. DF-022 retired the broker's plaintext .env. This run"
+    echo "         touches ONLY ${ENV_FILE} — the sops authority and EVERY consumer enc"
+    echo "         file are left untouched (R4 is runbook-only). If the estate is on sops,"
+    echo "         stop and re-run with --source sops."
+fi
 
 # ---------------------------------------------------------------------------
 # XTRACE LAW helpers — see the header. Bracket EVERY secret-touching region.
@@ -326,10 +359,16 @@ container_running() {
 # --server value is a bridge IP:port and carries NO credential — the 07-30
 # display-exposure rule (never a creds-embedded URL to a chatty CLI).
 # XTRACE LAW: only ever called from inside an xtrace_off region.
+# RC CONTRACT: 0 = authenticated · 90 = THE PROBE COULD NOT RUN (no container IP)
+# · anything else = the broker refused. 90 is a distinct sentinel on purpose:
+# R2a is the gate-of-the-gate, and "could not ask" must never be scored as
+# "correctly refused" (that would make R2/R3 vacuous — the very thing R2a exists
+# to prevent). 90 is outside the nats CLI's own exit range.
+PROBE_UNAVAILABLE=90
 probe_pub() {
     local pw="$1" ip
     ip="$(resolve_ip)"
-    [ -n "${ip}" ] || return 2
+    [ -n "${ip}" ] || return "${PROBE_UNAVAILABLE}"
     NATS_USER="${PROBE_USER}" NATS_PASSWORD="${pw}" \
         nats pub "${PROBE_SUBJECT}" "sec-rotate-probe" \
         --server "nats://${ip}:4222" --timeout 3s >/dev/null 2>&1
@@ -422,26 +461,48 @@ sops_encrypt_from_DOTENV_OUT() {
 # XTRACE LAW: caller region only.
 # ---------------------------------------------------------------------------
 
-# Swap the password inside a nats DSN. Globals in: URL_IN, PROBE_USER, NEW_PW.
-# Globals out: URL_OUT, URL_RC (0 ok · 1 unparseable · 2 different user).
+# Validate a nats DSN WITHOUT touching NEW_PW — the single parser, so the PLAN
+# phase and the APPLY phase can never disagree about what is rewritable.
+# Globals in: URL_IN, PROBE_USER. Globals out: URL_RC (0 ok · 1 unparseable ·
+# 2 different user). Never emits a value.
 URL_IN=""; URL_OUT=""; URL_RC=0
-url_swap_password() {
-    local scheme rest userinfo hostpart user
-    URL_OUT=""; URL_RC=0
+url_validate() {
+    local rest userinfo user
+    URL_RC=0
     case "${URL_IN}" in
         *://*@*) ;;
         *) URL_RC=1; return 0 ;;
     esac
-    scheme="${URL_IN%%://*}"
     rest="${URL_IN#*://}"
     userinfo="${rest%@*}"     # greedy-left: everything before the LAST @
-    hostpart="${rest##*@}"
     case "${userinfo}" in
         *:*) user="${userinfo%%:*}" ;;
         *) URL_RC=1; return 0 ;;
     esac
     if [ "${user}" != "${PROBE_USER}" ]; then URL_RC=2; return 0; fi
-    URL_OUT="${scheme}://${user}:${NEW_PW}@${hostpart}"
+    return 0
+}
+
+# A NON-secret reason string for a URL_RC. Globals in: URL_RC. Safe to display.
+url_rc_reason() {  # $1 = the key name (a ref-name, never a value)
+    case "${URL_RC}" in
+        1) printf '%s' "value of $1 is not a user:pw@host DSN" ;;
+        2) printf '%s' "$1 carries a DIFFERENT nats user than '${PROBE_USER}'" ;;
+        *) printf '%s' "internal url parse rc ${URL_RC} on $1" ;;
+    esac
+}
+
+# Swap the password inside a nats DSN. Globals in: URL_IN, PROBE_USER, NEW_PW.
+# Globals out: URL_OUT, URL_RC (0 ok · 1 unparseable · 2 different user).
+url_swap_password() {
+    local scheme rest hostpart
+    URL_OUT=""
+    url_validate
+    [ "${URL_RC}" = "0" ] || return 0
+    scheme="${URL_IN%%://*}"
+    rest="${URL_IN#*://}"
+    hostpart="${rest##*@}"
+    URL_OUT="${scheme}://${PROBE_USER}:${NEW_PW}@${hostpart}"
     return 0
 }
 
@@ -459,12 +520,13 @@ dotenv_rewrite_key() {
             if [ "${EDIT_MODE}" = "url" ]; then
                 URL_IN="${value}"
                 url_swap_password
-                case "${URL_RC}" in
-                    0) line="${key}=${URL_OUT}"; EDIT_HITS=$((EDIT_HITS + 1)) ;;
-                    1) EDIT_ERR="value of ${EDIT_KEY} is not a user:pw@host DSN" ;;
-                    2) EDIT_ERR="${EDIT_KEY} carries a DIFFERENT nats user than '${PROBE_USER}'" ;;
-                    *) EDIT_ERR="internal url_swap rc ${URL_RC}" ;;
-                esac
+                if [ "${URL_RC}" = "0" ]; then
+                    line="${key}=${URL_OUT}"; EDIT_HITS=$((EDIT_HITS + 1))
+                else
+                    # Defence-in-depth only: plan_consumers already refused this
+                    # shape BEFORE any write (the two-phase guarantee).
+                    EDIT_ERR="$(url_rc_reason "${EDIT_KEY}")"
+                fi
                 URL_IN=""; URL_OUT=""
             else
                 line="${key}=${NEW_PW}"
@@ -520,9 +582,14 @@ consumer_rows() {  # stdout: the CONSUMERS rows for this account (non-secret)
     printf '%s\n' "${CONSUMERS}" | awk -F'|' -v a="${ACCOUNT}" '$1 == a'
 }
 
-# Validate every LOCAL consumer row BEFORE any write (two-phase: a missing
-# required key must abort while the estate is still consistent).
-# Fills CONSUMER_PLAN (rel|mode:key|verdict) — verdicts: APPLY · SKIP-NOKEY.
+# Validate every LOCAL consumer row BEFORE any write (two-phase: ANY condition
+# that would make the APPLY phase abort must be caught here, while the estate is
+# still consistent). That is: the file exists · it decrypts · the key is present
+# · AND (url rows) its value really is a DSN whose userinfo user is this
+# account's nats user. Validating the DSN only at apply-time was the half-applied
+# rotation hole — the authority and earlier rows were already rewritten before
+# the drifted row was ever parsed.
+# Fills CONSUMER_PLAN (rel|mode|key) — verdicts printed: APPLY · SKIP.
 CONSUMER_PLAN=()
 plan_consumers() {
     local row host rel spec need note mode key
@@ -548,8 +615,19 @@ plan_consumers() {
         fi
         EDIT_KEY="${key}"
         dotenv_get_key
+        local found="${VALUE_FOUND}" urc=0 reason=""
+        # url rows: parse + user-match NOW, in the plan phase, so a drifted or
+        # non-DSN value can never abort a half-written estate. The value stays
+        # inside this xtrace_off region and is never emitted; only the key NAME
+        # appears in the reason string.
+        if [ "${found}" = "1" ] && [ "${mode}" = "url" ]; then
+            URL_IN="${VALUE_OUT}"
+            url_validate
+            urc="${URL_RC}"
+            if [ "${urc}" != "0" ]; then reason="$(url_rc_reason "${key}")"; fi
+            URL_IN=""; URL_RC=0
+        fi
         VALUE_OUT=""
-        local found="${VALUE_FOUND}"
         DOTENV_IN=""
         xtrace_on
         if [ "${found}" != "1" ]; then
@@ -558,6 +636,12 @@ plan_consumers() {
             fi
             echo "  R4 plan: SKIP  ${rel} (${key}) — key absent, row is 'opt' [DISCOVERY stays open]"
             continue
+        fi
+        if [ "${urc}" != "0" ]; then
+            # 'opt' covers an ABSENT key, never a PRESENT-but-drifted one: a copy
+            # that claims to carry this account's credential but does not is a
+            # map-vs-estate divergence the operator must reconcile first.
+            die "R4 PLAN FAIL: ${rel}: ${reason} (map vs estate drift — reconcile PAGE-nats §3 first; no write performed)"
         fi
         echo "  R4 plan: APPLY ${rel} (${mode}:${key})"
         CONSUMER_PLAN+=("${rel}|${mode}|${key}")
@@ -818,9 +902,13 @@ fi
 if [ "${SOURCE_MODE}" = "plaintext" ]; then
     # Atomic env-file edit (only the target line changes; mode preserved). The
     # NEW value is written via a pure-shell rewrite; it never touches argv.
+    # RUNTIME PLAINTEXT LAW applies to THIS path too: the working copy is a 0600
+    # temp on the caller's tmpfs, registered with the shred-trap. It is NEVER
+    # created beside ${ENV_FILE} — that path is typically inside a git work tree,
+    # mktemp's 0600 would then be widened to the source's (possibly 644) mode,
+    # and a leftover would be un-gitignored and stageable by `git add -A`.
     old_mode="$(stat -c '%a' "${ENV_FILE}")"
-    tmp_env="$(mktemp "${ENV_FILE}.rotate.XXXXXX")"
-    chmod "${old_mode}" "${tmp_env}"
+    runtime_tmp; tmp_env="${RUNTIME_TMP_OUT}"; RUNTIME_TMP_OUT=""
     xtrace_off
     rewrote=0
     while IFS= read -r line || [ -n "${line}" ]; do
@@ -831,11 +919,15 @@ if [ "${SOURCE_MODE}" = "plaintext" ]; then
     done < "${ENV_FILE}" > "${tmp_env}"
     xtrace_on
     if [ "${rewrote}" != "1" ]; then
-        rm -f "${tmp_env}"
+        shred -u -n 1 "${tmp_env}" 2>/dev/null || rm -f "${tmp_env}"
         die "internal: did not rewrite the '${VAR_NAME}=' line"
     fi
-    mv "${tmp_env}" "${ENV_FILE}"
+    # install(1), not mv: the temp lives on another filesystem (tmpfs) and must be
+    # shredded, not moved. Mode is set explicitly from the source.
+    install -m "${old_mode}" "${tmp_env}" "${ENV_FILE}"
+    shred -u -n 1 "${tmp_env}" 2>/dev/null || rm -f "${tmp_env}"
     echo "GATE R1 PASS: '${VAR_NAME}' line updated in ${ENV_FILE} (mode ${old_mode} preserved)"
+    echo "  NOTE: plaintext source — the sops estate (authority + consumer enc files) was NOT touched."
 else
     xtrace_off
     sops_decrypt_into_DOTENV_IN "${ENC_FILE}" || { DOTENV_IN=""; xtrace_on; die "R1 FAIL: decrypt of ${ENC_FILE} failed"; }
@@ -914,9 +1006,11 @@ fi
 # ---------------------------------------------------------------------------
 xtrace_off
 r2a_rc=0
-probe_pub "${WRONG_PW}" || r2a_rc=1
+probe_pub "${WRONG_PW}" || r2a_rc=$?
 xtrace_on
-[ "${r2a_rc}" = "1" ] || die "GATE R2a FAIL: a deliberately-wrong password AUTHENTICATED — auth path vacuous; aborting before R2/R3"
+[ "${r2a_rc}" != "${PROBE_UNAVAILABLE}" ] || \
+    die "GATE R2a INCONCLUSIVE: the probe could not run (no container IP) — 'could not ask' is NOT 'correctly refused'; aborting before R2/R3"
+[ "${r2a_rc}" != "0" ] || die "GATE R2a FAIL: a deliberately-wrong password AUTHENTICATED — auth path vacuous; aborting before R2/R3"
 echo "GATE R2a PASS: the auth path refuses a wrong password"
 
 # ---------------------------------------------------------------------------
@@ -924,8 +1018,10 @@ echo "GATE R2a PASS: the auth path refuses a wrong password"
 # ---------------------------------------------------------------------------
 xtrace_off
 r2_rc=0
-probe_pub "${NEW_PW}" || r2_rc=1
+probe_pub "${NEW_PW}" || r2_rc=$?
 xtrace_on
+[ "${r2_rc}" != "${PROBE_UNAVAILABLE}" ] || \
+    die "GATE R2 INCONCLUSIVE: the probe could not run (no container IP) — no verdict"
 [ "${r2_rc}" = "0" ] || die "GATE R2 FAIL: new password rejected — source and broker disagree; investigate before touching consumers"
 echo "GATE R2 PASS: new password authenticates (user '${PROBE_USER}')"
 
@@ -935,9 +1031,11 @@ echo "GATE R2 PASS: new password authenticates (user '${PROBE_USER}')"
 if [ "${OLD_GIVEN}" = "1" ]; then
     xtrace_off
     r3_rc=0
-    probe_pub "${OLD_PW}" || r3_rc=1
+    probe_pub "${OLD_PW}" || r3_rc=$?
     xtrace_on
-    [ "${r3_rc}" = "1" ] || die "GATE R3 FAIL: the OLD password still authenticates — rotation did not take"
+    [ "${r3_rc}" != "${PROBE_UNAVAILABLE}" ] || \
+        die "GATE R3 INCONCLUSIVE: the probe could not run (no container IP) — no verdict"
+    [ "${r3_rc}" != "0" ] || die "GATE R3 FAIL: the OLD password still authenticates — rotation did not take"
     echo "GATE R3 PASS: old credential is dead"
 else
     echo "GATE R3 SKIPPED: no old password provided (pipe a second line / enter it at the prompt to enable)"

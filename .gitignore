@@ -212,3 +212,15 @@ __marimo__/
 .AppleDouble
 .LSOverride
 ._*
+
+# --- DF-022 secrets hygiene (nats-infrastructure) -------------------------
+# Rotation working files must never be stageable. rotate-nats-password.sh now
+# writes its only plaintext window to /run/user/$UID (RUNTIME PLAINTEXT LAW);
+# this is belt-and-braces for restored backups and legacy leftovers, since bare
+# `.env` above does NOT cover `.env.rotate.XXXXXX` / `.env.deploy` / `.env.kc`.
+.env.*
+!.env.example
+# Legacy ephemeral land-check harness output (2026-07-11): an 8-key plaintext
+# dotenv + a ps-argv dump at rest inside a DF-022 repo. Values are SYNTHETIC
+# (verified zero intersection with the live broker set) — S4 owes it a shred row.
+scripts/undefined/
