@@ -450,7 +450,16 @@ sops_encrypt_from_DOTENV_OUT() {
     ( cd "${SECRETS_ROOT}" && "${SOPS_BIN}" -e --input-type dotenv --output-type dotenv \
         --filename-override "${rel}" "${tmp_plain}" ) > "${tmp_cipher}"
     # Only after a SUCCESSFUL encrypt does the destination change (set -e above).
-    install -m "${mode}" "${tmp_cipher}" "${SECRETS_ROOT}/${rel}"
+    # COACH FIX (2026-07-30): atomic delivery — install(1) unlinks the dest
+    # before recreating it, leaving a crash window in which the SOLE ciphertext
+    # copy of live credentials does not exist. Stage the ciphertext (never
+    # plaintext) in a temp INSIDE the destination directory and mv over the
+    # dest: an atomic same-filesystem rename with no missing-file window.
+    local dest_tmp
+    dest_tmp="$(mktemp "${SECRETS_ROOT}/${rel}.tmp.XXXXXX")"
+    cp "${tmp_cipher}" "${dest_tmp}"
+    chmod "${mode}" "${dest_tmp}"
+    mv -f "${dest_tmp}" "${SECRETS_ROOT}/${rel}"
     shred -u -n 1 "${tmp_plain}" 2>/dev/null || rm -f "${tmp_plain}"
     shred -u -n 1 "${tmp_cipher}" 2>/dev/null || rm -f "${tmp_cipher}"
 }
@@ -616,6 +625,18 @@ plan_consumers() {
         EDIT_KEY="${key}"
         dotenv_get_key
         local found="${VALUE_FOUND}" urc=0 reason=""
+        # COACH BLOCKER FIX (2026-07-30): enforce the exactly-one-line invariant
+        # HERE, in PLAN, so a duplicate-key consumer file can never abort at
+        # APPLY with the authority already rewritten (the half-applied-estate
+        # class ffa9ed5/26eb78b closed for shape/user but not for multiplicity).
+        # grep -c emits a count, never a value; we are inside xtrace_off.
+        local plan_kcount
+        plan_kcount="$(printf '%s\n' "${DOTENV_IN}" | grep -c "^${key}=" || true)"
+        if [ "${found}" = "1" ] && [ "${plan_kcount}" != "1" ]; then
+            VALUE_OUT=""; DOTENV_IN=""
+            xtrace_on
+            die "R4 PLAN FAIL: ${rel} carries ${plan_kcount} '${key}=' lines (expected exactly 1) — no write performed"
+        fi
         # url rows: parse + user-match NOW, in the plan phase, so a drifted or
         # non-DSN value can never abort a half-written estate. The value stays
         # inside this xtrace_off region and is never emitted; only the key NAME
@@ -776,7 +797,11 @@ restart_freeze_gate() {
         echo "GATE RF (dry-run): WOULD require ${RF_STREAM}/${RF_DURABLE} to show Ack Pending 0 before any recreate"
         return 0
     fi
-    [ -n "${OLD_PW}" ] || die "GATE RF FAIL: need the CURRENT ${ACCOUNT} credential (on stdin) to query ${RF_STREAM}/${RF_DURABLE}, or pass --skip-freeze-check"
+    # COACH BLOCKER FIX (2026-07-30): test the non-secret OLD_GIVEN flag —
+    # `[ -n "${OLD_PW}" ]` here sat OUTSIDE the xtrace bracket and printed the
+    # old credential verbatim under bash -x (the XTRACE LAW's own test missed
+    # this line because the shipped harness never drives --live).
+    [ "${OLD_GIVEN}" = "1" ] || die "GATE RF FAIL: need the CURRENT ${ACCOUNT} credential (on stdin) to query ${RF_STREAM}/${RF_DURABLE}, or pass --skip-freeze-check"
     local ip info
     ip="$(resolve_ip)"
     [ -n "${ip}" ] || die "GATE RF FAIL: cannot resolve the container IP to query the consumer"

@@ -238,6 +238,11 @@ EOF
             # Present, required, but not a DSN at all (a host:port was recorded).
             printf 'FLEET_MEMORY_NATS_URL=127.0.0.1:4222\nFLEET_MEMORY_EMBED_URL=http://127.0.0.1:8080\n' \
                 > "${root}/fleet-memory-pg/fleet-memory-root.enc.env" ;;
+        break-dup-key)
+            # COACH BLOCKER (2026-07-30): the key present TWICE — must abort in
+            # PLAN, never at apply with the authority already rewritten.
+            printf 'FLEET_MEMORY_NATS_URL=nats://fleet-memory:%s@127.0.0.1:4222\nFLEET_MEMORY_NATS_URL=nats://fleet-memory:%s@127.0.0.1:4222\nFLEET_MEMORY_EMBED_URL=http://127.0.0.1:8080\n' \
+                "${OLD_FM}" "${OLD_FM}" > "${root}/fleet-memory-pg/fleet-memory-root.enc.env" ;;
         *)
             printf 'FLEET_MEMORY_NATS_URL=nats://fleet-memory:%s@127.0.0.1:4222\nFLEET_MEMORY_EMBED_URL=http://127.0.0.1:8080\n' \
                 "${OLD_FM}" > "${root}/fleet-memory-pg/fleet-memory-root.enc.env" ;;
@@ -568,6 +573,7 @@ url_drift_case break-url-user "drifted DSN user"
 echo ""
 echo "--- (6d) two-phase safety: url row whose value is not a DSN ---"
 url_drift_case break-url-shape "non-DSN url value"
+url_drift_case break-dup-key "dup-key row (coach blocker 2026-07-30)"
 
 # ---------------------------------------------------------------------------
 # (6e) source selection: a stray plaintext .env must NOT divert the rotation.
