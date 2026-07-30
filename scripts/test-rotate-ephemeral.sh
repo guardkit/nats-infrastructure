@@ -30,6 +30,13 @@
 #   (v)   teardown: the container is GONE after EXIT — including a second,
 #         deliberately-failed run proving the trap fires on failure
 #
+# 2026-07-30 (S1, DF-022): the rotation script gained the sops-aware dual mode.
+# Docker/nats verbs are now behind an explicit `--live` (default DRY = runbook
+# only), so BOTH invocations below pass `--live --source plaintext`. This file
+# remains the PLAINTEXT-path proof and needs a live docker daemon + the scratch
+# image; the sops path's proof is `test-rotate-sops-fixture.sh` (no daemons at
+# all). Not re-run at the S1 landing — the S1 lane was fenced off docker.
+#
 # USAGE:
 #   test-rotate-ephemeral.sh [--runid <id>] [--work-root <dir>]
 #                            [--nats-repo <path>] [--pin <sha>]
@@ -208,8 +215,8 @@ PS_DRY_BEFORE="$(docker ps -a --format '{{.ID}}' | sort)"
 DRYLOG="${SCRATCH}/dry.log"
 DRY_NEW="$(gen)"   # alnum, satisfies the charset guard
 if printf '%s\n%s\n' "${DRY_NEW}" "${SCRATCH_PW[RICH]}" | \
-        "${ROTATE}" --account "${ACCOUNT}" --container "${CNAME}" \
-        --env-file "${SCRATCH_ENV}" --register-page "${REGISTER_PAGE}" \
+        "${ROTATE}" --account "${ACCOUNT}" --live --container "${CNAME}" \
+        --source plaintext --env-file "${SCRATCH_ENV}" --register-page "${REGISTER_PAGE}" \
         > "${DRYLOG}" 2>&1; then
     if grep -q "DRY-RUN complete" "${DRYLOG}"; then
         pass "dry-run exited 0 and reported DRY-RUN complete"
@@ -236,9 +243,9 @@ ROTLOG="${SCRATCH}/exec.log"
 
 # Launch the rotation in the background; feed NEW + OLD via a stdin pipe.
 printf '%s\n%s\n' "${EXEC_NEW}" "${EXEC_OLD}" | \
-    "${ROTATE}" --execute --restart-mode external \
+    "${ROTATE}" --execute --live --restart-mode external \
     --account "${ACCOUNT}" --container "${CNAME}" \
-    --env-file "${SCRATCH_ENV}" --register-page "${REGISTER_PAGE}" \
+    --source plaintext --env-file "${SCRATCH_ENV}" --register-page "${REGISTER_PAGE}" \
     --poll-timeout 60 > "${ROTLOG}" 2>&1 &
 ROT_PID=$!
 
