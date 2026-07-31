@@ -54,6 +54,22 @@
 #   (10) display audit: no secret value on the script's stdout/stderr
 #   (11) non-recipient refusal (the R2a analogue at the sops layer)
 #   (12) flag fences: --live without --container, and --container without --live
+#   (13) SERVICE vs CONTAINER (2026-07-31 defect 1): the emitted AND the executed
+#        `docker compose … --force-recreate <X>` take the compose SERVICE name
+#        (--compose-service), never the --container value; the container name is
+#        still what `docker inspect` is asked about; and --restart-mode
+#        compose-recreate REFUSES to run without an explicit --compose-service
+#   (14) the emitted [FREEZE] step WORKS AS WRITTEN (2026-07-31 defect 2): its
+#        credentials ride as an assignment prefix INSIDE the sops exec-env quoted
+#        command (env, never argv), and the FORGE self-rotation caveat is emitted
+#   (15) PROBE-SUBJECT LAW (2026-07-31 defect 3), BOTH clauses: for every
+#        account, the probe subject the script announces must be (a) PERMITTED —
+#        matched against that user's `publish:` grants PARSED OUT of
+#        config/accounts/accounts.conf.template (an unpermitted subject is
+#        refused asynchronously by a core `nats pub`, so GATE R2 would pass
+#        vacuously) — AND (b) checked against the stream filters PARSED OUT of
+#        streams/stream-definitions.json: an uncaptured subject must carry NO
+#        attribution note, a captured one MUST carry a loud one
 #
 # USAGE: test-rotate-sops-fixture.sh [--keep]
 # EXIT: 0 = all assertions passed · non-zero = at least one failed.
@@ -85,6 +101,7 @@ chk()   { if [ "$1" = "0" ]; then pass "$2"; else fail "$3"; fi; }      # $1 = r
 nchk()  { if [ "$1" != "0" ]; then pass "$2"; else fail "$3"; fi; }     # $1 = rc, expect non-zero
 same()  { if [ "$1" = "$2" ]; then pass "$3"; else fail "$4"; fi; }     # values NEVER printed
 has()   { if grep -Fq -- "$2" "$1"; then pass "$3"; else fail "$4"; fi; }
+nohas() { if grep -Fq -- "$2" "$1"; then fail "$4"; else pass "$3"; fi; }
 
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/rotate-sops-fixture.XXXXXX")"
 cleanup() {
@@ -723,6 +740,412 @@ chk "${argv_hit}" "no secret value in any sampled 'ps -eo args'" \
     "${argv_hit} argv exposure(s) (values not quoted)"
 same "$(val_of "${ROOT3}" nats/broker.enc.env RICH_NATS_PASSWORD)" "${XNEW}" \
     "the traced run really rotated (authority carries the new value)" "the traced run did not rotate"
+
+# ---------------------------------------------------------------------------
+# (13) SERVICE vs CONTAINER — the 2026-07-31 conflation.
+# `docker compose up -d --force-recreate <X>` resolves X against the compose
+# file's `services:` keys; `docker inspect <Y>` resolves Y against CONTAINER
+# names. This project maps service `nats` -> container `ships-computer-nats`, so
+# feeding the container name to compose fails with 'no such service'.
+# ---------------------------------------------------------------------------
+echo ""
+echo "--- (13) compose SERVICE vs docker CONTAINER ---"
+# (13a) the DRY runbook's [RE-RENDER] line carries the default SERVICE.
+has "${DRYLOG}" "up -d --force-recreate nats'" \
+    "(13a) default runbook recreate names the compose SERVICE 'nats'" \
+    "(13a) the default runbook recreate lost the compose service name"
+# (13b) --compose-service really plumbs through to the emitted line.
+CSVCLOG="${WORK}/dry-compose-service.log"
+csvc_rc=0
+run_rotate "${CSVCLOG}" "$(gen)" "$(gen)" --account RICH --compose-service brokerx || csvc_rc=$?
+chk "${csvc_rc}" "(13b) --compose-service dry run exited 0" "(13b) --compose-service dry run exited ${csvc_rc}"
+has "${CSVCLOG}" "up -d --force-recreate brokerx'" \
+    "(13b) --compose-service brokerx reaches the emitted recreate line" \
+    "(13b) --compose-service was ignored by the runbook emitter"
+nohas "${CSVCLOG}" "up -d --force-recreate nats'" \
+    "(13b) the overridden runbook no longer names the default service" \
+    "(13b) the runbook emitted BOTH the default and the overridden service"
+# (13c) the EXECUTED compose line. Recording shims stand in for docker/nats.
+# THE FENCE IS NOT WEAKENED: the recorder is prepended IN FRONT of the exit-97
+# forbidden shim, which itself sits in front of the real binaries — a miss falls
+# through to the fence, never to a real daemon. The recorder opens no socket: it
+# appends its argv to a log and answers the two `docker inspect` templates the
+# script needs from a literal string. The PATH override is inline, so it applies
+# to this ONE invocation and the forbidden-verb audit stays armed everywhere else.
+RECSHIM="${WORK}/recshim"
+RECLOG="${WORK}/recorded-invocations.log"
+mkdir -p "${RECSHIM}"
+: > "${RECLOG}"
+cat > "${RECSHIM}/docker" <<EOF
+#!/usr/bin/env bash
+printf 'docker %s\n' "\$*" >> "${RECLOG}"
+if [ "\$1" = "inspect" ]; then
+    case "\$*" in
+        *State.Running*) echo "true" ;;
+        *IPAddress*)     echo "10.255.255.254" ;;
+    esac
+fi
+exit 0
+EOF
+cat > "${RECSHIM}/nats" <<EOF
+#!/usr/bin/env bash
+printf 'nats %s\n' "\$*" >> "${RECLOG}"
+exit 1
+EOF
+chmod 755 "${RECSHIM}/docker" "${RECSHIM}/nats"
+ROOT6="${WORK}/fleet-secrets-compose"
+make_root "${ROOT6}" ok
+CSLOG="${WORK}/exec-compose-recreate.log"
+cs_rc=0
+printf '%s\n%s\n' "$(gen)" "${OLD_RICH}" | \
+    PATH="${RECSHIM}:${PATH}" "${ROTATE}" --secrets-root "${ROOT6}" --sops-bin "${SOPS_BIN}" \
+    --source sops --register-page "${REGISTER_PAGE}" --account RICH --execute \
+    --live --container ships-computer-nats --restart-mode compose-recreate \
+    --compose-service scratch-svc --poll-timeout 2 > "${CSLOG}" 2>&1 || cs_rc=$?
+has "${CSLOG}" "Recreating via compose (OPERATOR path)" \
+    "(13c) the run reached the compose-recreate step" \
+    "(13c) the run never reached the compose-recreate step (nothing to audit)"
+has "${RECLOG}" "up -d --force-recreate scratch-svc" \
+    "(13c) EXECUTED compose line carries the SERVICE name" \
+    "(13c) the executed compose line did not carry the --compose-service value"
+if grep -F 'up -d --force-recreate' "${RECLOG}" | grep -Fq 'ships-computer-nats'; then
+    fail "(13c) THE DEFECT: the CONTAINER name was handed to 'docker compose --force-recreate'"
+else
+    pass "(13c) the container name never appears on a compose --force-recreate line"
+fi
+if grep -F 'docker inspect' "${RECLOG}" | grep -Fq 'ships-computer-nats'; then
+    pass "(13c) --container keeps its CONTAINER meaning (R0/probe inspect by name)"
+else
+    fail "(13c) the container name was not used for the docker inspect gates"
+fi
+# The run is EXPECTED to end non-zero: the recorder's `nats` always refuses, so
+# wait_for_new_auth times out AFTER the recreate. That is the point at which it
+# must fail — anything earlier means the compose audit above was vacuous.
+nchk "${cs_rc}" "(13c) the fenced live run ends at the auth wait (rc ${cs_rc}), after the recreate" \
+    "(13c) the fenced live run exited 0 — the auth gates were satisfied by a shim"
+has "${CSLOG}" "never became live" \
+    "(13c) the failure is the auth-wait timeout, not an earlier abort" \
+    "(13c) the run aborted somewhere other than the auth wait"
+# (13d) THE REQUIREMENT, not a default. A defaulted service name is still a
+# guess, and guessing is the whole defect — compose-recreate must REFUSE to
+# proceed without an explicit --compose-service, with a message that names both
+# flags in plain words. Nothing else about the estate may be touched.
+CSREQLOG="${WORK}/fence-compose-service-missing.log"
+HASH_CSREQ="$(hash_root "${ROOT6}")"
+csreq_rc=0
+printf '%s\n\n' "$(gen)" | "${ROTATE}" --secrets-root "${ROOT6}" --sops-bin "${SOPS_BIN}" \
+    --source sops --register-page "${REGISTER_PAGE}" --account RICH \
+    --restart-mode compose-recreate > "${CSREQLOG}" 2>&1 || csreq_rc=$?
+nchk "${csreq_rc}" "(13d) --restart-mode compose-recreate WITHOUT --compose-service is refused" \
+    "(13d) compose-recreate ran with no --compose-service — the name was guessed again"
+has "${CSREQLOG}" "requires --compose-service" \
+    "(13d) the refusal names the missing flag" \
+    "(13d) the refusal does not name --compose-service"
+has "${CSREQLOG}" "It is NOT --container" \
+    "(13d) the refusal spells out the SERVICE-vs-CONTAINER distinction in plain words" \
+    "(13d) the refusal leaves the operator to work out which name is wanted"
+has "${CSREQLOG}" "no such service" \
+    "(13d) the refusal quotes the failure the operator would otherwise have seen" \
+    "(13d) the refusal omits the actual compose failure mode"
+same "$(hash_root "${ROOT6}")" "${HASH_CSREQ}" \
+    "(13d) the refused run mutated nothing" "(13d) an enc file changed during the refused run"
+# (13e) an EMPTY service name is refused too: `up -d --force-recreate` with no
+# operand widens to EVERY service in the project — a fleet-wide recreate from a
+# typo'd flag value.
+CSEMPTYLOG="${WORK}/fence-compose-service-empty.log"
+csempty_rc=0
+printf '%s\n\n' "$(gen)" | "${ROTATE}" --secrets-root "${ROOT6}" --sops-bin "${SOPS_BIN}" \
+    --source sops --register-page "${REGISTER_PAGE}" --account RICH \
+    --restart-mode compose-recreate --compose-service "" > "${CSEMPTYLOG}" 2>&1 || csempty_rc=$?
+nchk "${csempty_rc}" "(13e) an EMPTY --compose-service is refused" \
+    "(13e) an empty --compose-service was accepted — the recreate would widen to every service"
+has "${CSEMPTYLOG}" "must not be empty" \
+    "(13e) the refusal says the service name may not be empty" \
+    "(13e) the empty-value refusal came from somewhere else"
+# (13f) external mode is UNAFFECTED — it executes no compose verb, so it must
+# never acquire the new requirement. (DRYLOG above is exactly such a run and
+# exited 0; assert the runbook flags its service name as the repo fallback so a
+# paste-follower is not handed an unchecked guess.)
+has "${DRYLOG}" "no --compose-service was passed" \
+    "(13f) external-mode runbook marks its service name as this repo's own fallback" \
+    "(13f) the external-mode runbook presents an unpassed service name as authoritative"
+nohas "${CSVCLOG}" "no --compose-service was passed" \
+    "(13f) the fallback caveat disappears once --compose-service is given" \
+    "(13f) the fallback caveat is printed even when the flag was passed"
+
+# ---------------------------------------------------------------------------
+# (14) the emitted [FREEZE] step must WORK AS WRITTEN.
+# Emitted bare (no creds) it dies with 'Authorization Violation'; emitted with
+# creds on argv it would leak them to `ps`. The one shape that satisfies both is
+# an assignment PREFIX inside the sops exec-env quoted command.
+# ---------------------------------------------------------------------------
+echo ""
+echo "--- (14) emitted [FREEZE] step carries credentials, via env, inside exec-env ---"
+FREEZE_CMD="'NATS_USER=forge NATS_PASSWORD=\"\$FORGE_NATS_PASSWORD\" nats consumer info PIPELINE forge-serve --server nats://127.0.0.1:4222'"
+has "${DRYLOG}" "${FREEZE_CMD}" \
+    "(14) the freeze step is emitted with NATS_USER/NATS_PASSWORD as an env assignment prefix" \
+    "(14) the emitted freeze step does not carry the proven credential shape"
+nohas "${DRYLOG}" "exec-env nats/broker.enc.env 'nats consumer info" \
+    "(14) the old credential-less freeze line is gone" \
+    "(14) THE DEFECT: the freeze line is still emitted with no credentials"
+nohas "${DRYLOG}" "--password" \
+    "(14) no --password style argv flag is ever emitted" \
+    "(14) the runbook emits a credential on argv"
+nohas "${DRYLOG}" "nats://forge:" \
+    "(14) no creds-embedded URL is emitted (the 2026-07-30 display exposure)" \
+    "(14) the runbook emits a creds-in-URL"
+if grep -A1 -F "exec-env nats/broker.enc.env \\" "${DRYLOG}" | grep -Fq "'NATS_USER=forge NATS_PASSWORD="; then
+    pass "(14) the credentialled command sits INSIDE the sops exec-env wrapper (next line)"
+else
+    fail "(14) the credentialled command is not wrapped by sops exec-env"
+fi
+nohas "${DRYLOG}" "ROTATING FORGE ITSELF" \
+    "(14) the forge self-rotation caveat is NOT shown for a RICH rotation" \
+    "(14) the forge-only caveat leaked into a RICH runbook"
+FZLOG="${WORK}/dry-forge-freeze.log"
+fz_rc=0
+run_rotate "${FZLOG}" "$(gen)" "$(gen)" --account FORGE || fz_rc=$?
+chk "${fz_rc}" "(14) FORGE dry run exited 0" "(14) FORGE dry run exited ${fz_rc}"
+has "${FZLOG}" "ROTATING FORGE ITSELF" \
+    "(14) rotating FORGE emits the 'freeze reading must predate the write' caveat" \
+    "(14) the FORGE self-rotation caveat is missing — the emitted freeze line would be refused"
+
+# ---------------------------------------------------------------------------
+# (15) PROBE-SUBJECT LAW — derived, not golden. The stream filters are parsed
+# out of streams/stream-definitions.json at run time, so adding a stream that
+# swallows a probe subject fails this section without anyone editing a list.
+# ---------------------------------------------------------------------------
+echo ""
+echo "--- (15) probe subjects vs the JetStream stream filters ---"
+STREAM_DEFS="${SCRIPT_DIR}/../streams/stream-definitions.json"
+stream_filters() {
+    sed -n 's/.*"subjects"[[:space:]]*:[[:space:]]*\[\(.*\)\].*/\1/p' "${STREAM_DEFS}" \
+        | tr ',' '\n' | tr -d ' "' | grep -v '^$'
+}
+# Every KV bucket is ALSO a stream (KV_<bucket>) whose subject filter is
+# $KV.<bucket>.> — declared by name, never by a "subjects" key, so the parse
+# above cannot see it. A probe on a $KV subject would not merely be persisted:
+# it is a KV API call. Derive those filters too, from the same file.
+kv_filters() {
+    sed -n '/"kv_buckets"/,$p' "${STREAM_DEFS}" \
+        | sed -n "s/.*\"name\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\$KV.\1.>/p"
+}
+# NATS subject matching: '*' = exactly one token · '>' = one-or-more trailing
+# tokens · otherwise token equality.
+subject_matches_filter() {  # $1 subject · $2 filter → 0 = CAPTURED
+    local subj="$1" filt="$2" i=0
+    local -a s=() f=()
+    IFS='.' read -r -a s < <(printf '%s\n' "${subj}")
+    IFS='.' read -r -a f < <(printf '%s\n' "${filt}")
+    while [ "${i}" -lt "${#f[@]}" ]; do
+        if [ "${f[${i}]}" = ">" ]; then
+            if [ "${#s[@]}" -gt "${i}" ]; then return 0; fi
+            return 1
+        fi
+        if [ "${i}" -ge "${#s[@]}" ]; then return 1; fi
+        if [ "${f[${i}]}" != "*" ] && [ "${f[${i}]}" != "${s[${i}]}" ]; then return 1; fi
+        i=$((i + 1))
+    done
+    if [ "${#s[@]}" -eq "${#f[@]}" ]; then return 0; fi
+    return 1
+}
+[ -f "${STREAM_DEFS}" ] || { echo "stream definitions not found: ${STREAM_DEFS}" >&2; exit 2; }
+mapfile -t FILTERS < <(stream_filters; kv_filters)
+# Gate-of-the-gate #1: a parse that silently yields nothing would pass every
+# account vacuously. 8 declared streams (one of which lists 2 subjects) + 4 KV
+# buckets = 13 filters; require the full set, not "some".
+if [ "${#FILTERS[@]}" -ge 13 ]; then
+    pass "(15) parsed ${#FILTERS[@]} stream + KV subject filters out of stream-definitions.json"
+else
+    fail "(15) only ${#FILTERS[@]} filters parsed — the capture check would be vacuous"
+fi
+kv_seen=0
+for filt in "${FILTERS[@]}"; do
+    case "${filt}" in "\$KV."*) kv_seen=$((kv_seen + 1)) ;; esac
+done
+if [ "${kv_seen}" -ge 4 ]; then
+    pass "(15) the implicit KV_<bucket> streams are in the filter set (${kv_seen} \$KV filters)"
+else
+    fail "(15) only ${kv_seen} \$KV filters derived — a \$KV probe subject would slip through"
+fi
+# Gate-of-the-gate #2: the matcher itself must call the known cases correctly.
+matcher_bad=0
+if ! subject_matches_filter "memory.episode.sec.probe" "memory.episode.>"; then matcher_bad=$((matcher_bad + 1)); fi
+if ! subject_matches_filter "finproxy.sec.probe" "finproxy.>"; then matcher_bad=$((matcher_bad + 1)); fi
+if subject_matches_filter "probe.rich" "pipeline.>"; then matcher_bad=$((matcher_bad + 1)); fi
+if subject_matches_filter "_INBOX.sec.probe" "memory.dlq.>"; then matcher_bad=$((matcher_bad + 1)); fi
+if subject_matches_filter "memory.episode" "memory.episode.>"; then matcher_bad=$((matcher_bad + 1)); fi
+if ! subject_matches_filter "\$KV.agent-status.sec.probe" "\$KV.agent-status.>"; then matcher_bad=$((matcher_bad + 1)); fi
+if subject_matches_filter "probe.rich" "\$KV.agent-status.>"; then matcher_bad=$((matcher_bad + 1)); fi
+# …and on the PERMISSION half's cases too (the same matcher is reused below
+# against `publish:` grants — NATS wildcard semantics are identical for a stream
+# filter and a permission subject). An UNPERMITTED subject must be REJECTED by
+# every grant shape, and the allow-all grant `>` (accounts.conf.template:40,48)
+# must accept everything, or the new half would wave anything through.
+if subject_matches_filter "zzzbogus.sec.probe" "runbook.>"; then matcher_bad=$((matcher_bad + 1)); fi
+if subject_matches_filter "zzzbogus.sec.probe" "memory.episode.>"; then matcher_bad=$((matcher_bad + 1)); fi
+if subject_matches_filter "runbook.sec.probe" "runbook.build.>"; then matcher_bad=$((matcher_bad + 1)); fi
+if ! subject_matches_filter "zzzbogus.sec.probe" ">"; then matcher_bad=$((matcher_bad + 1)); fi
+if ! subject_matches_filter "_INBOX.sec.probe" "_INBOX.>"; then matcher_bad=$((matcher_bad + 1)); fi
+chk "${matcher_bad}" "(15) the subject/filter matcher is sound on known cases" \
+    "(15) ${matcher_bad} matcher self-test(s) failed — the capture verdicts cannot be trusted"
+
+# ---------------------------------------------------------------------------
+# (15) THE PERMISSION HALF. The PROBE-SUBJECT LAW (rotate-nats-password.sh:59-63)
+# has TWO clauses: the probe subject must be (a) PERMITTED for the account AND
+# (b) captured by no stream filter. The filter parse above tests (b) only.
+# Testing (a) is not cosmetic: probe_pub (rotate-nats-password.sh:535-542) is a
+# fire-and-forget CORE `nats pub`, so a publish-permission violation is
+# delivered asynchronously — it neither closes the connection nor fails the CLI.
+# An unpermitted subject would therefore make GATE R2 pass VACUOUSLY, proving
+# nothing about the new credential, which is exactly the failure class R2a
+# exists to prevent. Derived, not golden: the grants are parsed out of
+# config/accounts/accounts.conf.template at run time, so narrowing a user's
+# grants fails this section without anyone editing a list here.
+# ---------------------------------------------------------------------------
+ACCOUNTS_TMPL="${SCRIPT_DIR}/../config/accounts/accounts.conf.template"
+[ -f "${ACCOUNTS_TMPL}" ] || { echo "accounts template not found: ${ACCOUNTS_TMPL}" >&2; exit 2; }
+# Prints one publish-grant subject per line for a nats user; empty output means
+# the user has NO permissions block (NATS = allow-all). Handles all three shapes
+# in the template: the single-string form (`publish: ">"`, …:40/48/189), the
+# one-line list (`publish: [ … ]`, …:106/124) and the multi-line list
+# (…:68-85/160-166). Whole-line `#` comments are dropped BEFORE quoted strings
+# are harvested, because the comment prose itself contains quoted subject-like
+# text (…:74-75, :81-82) that would otherwise be read as a grant.
+user_publish_grants() {  # $1 = nats user name
+    awk -v want="$1" '
+        function emit(t,   s) {
+            while (match(t, /"[^"]*"/)) {
+                s = substr(t, RSTART + 1, RLENGTH - 2)
+                if (s != "") { print s }
+                t = substr(t, RSTART + RLENGTH)
+            }
+        }
+        /^[[:space:]]*#/ { next }
+        match($0, /user:[[:space:]]*"[^"]+"/) {
+            u = substr($0, RSTART, RLENGTH)
+            sub(/^user:[[:space:]]*"/, "", u); sub(/"$/, "", u)
+            cur = u; inpub = 0; next
+        }
+        cur != want { next }
+        inpub == 0 && $0 ~ /publish:/ {
+            rest = $0
+            sub(/.*publish:[[:space:]]*/, "", rest)
+            emit(rest)
+            if (rest ~ /\[/ && rest !~ /\]/) { inpub = 1 }
+            next
+        }
+        inpub == 1 {
+            emit($0)
+            if ($0 ~ /\]/) { inpub = 0 }
+        }
+    ' "${ACCOUNTS_TMPL}"
+}
+# Gate-of-the-gate #3: a parse that silently yielded nothing would make the
+# permission half vacuous, so prove the parser on all three grant shapes and on
+# its comment immunity BEFORE any verdict leans on it. Structural, not golden —
+# adding a grant to a user must not break this.
+parser_bad=0
+mapfile -t G_MARK < <(user_publish_grants "mark")            # single-string form
+if [ "${#G_MARK[@]}" != "1" ] || [ "${G_MARK[0]}" != "finproxy.>" ]; then parser_bad=$((parser_bad + 1)); fi
+mapfile -t G_RICH < <(user_publish_grants "rich")            # single-string allow-all
+if [ "${#G_RICH[@]}" != "1" ] || [ "${G_RICH[0]}" != ">" ]; then parser_bad=$((parser_bad + 1)); fi
+mapfile -t G_GK < <(user_publish_grants "guardkit")          # one-line list form
+if [ "${#G_GK[@]}" != "1" ] || [ "${G_GK[0]}" != "memory.episode.>" ]; then parser_bad=$((parser_bad + 1)); fi
+mapfile -t G_FORGE < <(user_publish_grants "forge")          # multi-line list form
+if [ "${#G_FORGE[@]}" -lt 5 ]; then parser_bad=$((parser_bad + 1)); fi
+# first and last entries of the multi-line block: proves the accumulation runs
+# from the `publish: [` line through the closing `]`, not just the first line.
+forge_joined=" ${G_FORGE[*]} "
+case "${forge_joined}" in *" pipeline.> "*) : ;; *) parser_bad=$((parser_bad + 1)) ;; esac
+case "${forge_joined}" in *" _INBOX.> "*) : ;; *) parser_bad=$((parser_bad + 1)) ;; esac
+# comment immunity: a grant subject can never contain whitespace, so any
+# harvested prose (from the quoted fragments at …:74-75 / :81-82) shows up here.
+for g in "${G_FORGE[@]}" "${G_RICH[@]}" "${G_GK[@]}" "${G_MARK[@]}"; do
+    case "${g}" in *[[:space:]]*) parser_bad=$((parser_bad + 1)) ;; esac
+done
+chk "${parser_bad}" "(15) the publish-grant parser is sound on all three grant shapes (+ comment-immune)" \
+    "(15) ${parser_bad} grant-parser self-test(s) failed — the permission verdicts cannot be trusted"
+
+captured_accounts=""
+probe_bad=0
+for acct in ADMIN RICH JAMES MARK FORGE FLEET_MEMORY GUARDKIT JARVIS; do
+    plog="${WORK}/dry-probe-${acct}.log"
+    p_rc=0
+    run_rotate "${plog}" "$(gen)" "$(gen)" --account "${acct}" || p_rc=$?
+    if [ "${p_rc}" != "0" ]; then
+        fail "(15) ${acct}: dry run exited ${p_rc}"
+        probe_bad=$((probe_bad + 1))
+        continue
+    fi
+    subj="$(sed -n "s/^ *probe *: publish to '\([^']*\)'.*/\1/p" "${plog}" | head -1)"
+    if [ -z "${subj}" ]; then
+        fail "(15) ${acct}: the run did not announce a probe subject"
+        probe_bad=$((probe_bad + 1))
+        continue
+    fi
+    # ---- clause (a): is that subject PERMITTED for the user the probe runs as?
+    # The user comes from the run's own banner (rotate-nats-password.sh:433), so
+    # the account->user mapping is tested too, not assumed.
+    puser="$(sed -n "s/^ *account *: .*(nats user '\([^']*\)'.*/\1/p" "${plog}" | head -1)"
+    if [ -z "${puser}" ]; then
+        fail "(15) ${acct}: the run did not announce the probe's nats user"
+        probe_bad=$((probe_bad + 1))
+        continue
+    fi
+    mapfile -t GRANTS < <(user_publish_grants "${puser}")
+    permitted=""
+    if [ "${#GRANTS[@]}" -eq 0 ]; then
+        # accounts.conf.template:201-208 — admin's user carries NO permissions
+        # block at all, so NATS grants it every subject. That is the ONE
+        # allow-all exception; any OTHER user parsing empty is a parse hole or a
+        # user that may not publish at all, and must NOT be waved through.
+        if [ "${puser}" = "admin" ]; then
+            permitted="no permissions block — allow-all"
+        fi
+    else
+        for g in "${GRANTS[@]}"; do
+            if subject_matches_filter "${subj}" "${g}"; then permitted="${g}"; break; fi
+        done
+    fi
+    if [ -z "${permitted}" ]; then
+        fail "(15) ${acct}: '${subj}' is NOT permitted for nats user '${puser}' — the probe would be refused asynchronously and GATE R2 would pass VACUOUSLY"
+        probe_bad=$((probe_bad + 1))
+        continue
+    fi
+    # ---- clause (b): is it captured by a stream filter?
+    hit=""
+    for filt in "${FILTERS[@]}"; do
+        if subject_matches_filter "${subj}" "${filt}"; then hit="${filt}"; break; fi
+    done
+    noted=0
+    if grep -Fq "PROBE ATTRIBUTION" "${plog}"; then noted=1; fi
+    if [ -n "${hit}" ]; then
+        captured_accounts="${captured_accounts}${acct} "
+        if [ "${noted}" = "1" ]; then
+            pass "(15) ${acct}: '${subj}' is permitted ('${puser}' grant: ${permitted}), captured by '${hit}', and the run says so LOUDLY"
+        else
+            fail "(15) ${acct}: '${subj}' lands in a stream ('${hit}') with NO attribution note"
+            probe_bad=$((probe_bad + 1))
+        fi
+    else
+        if [ "${noted}" = "0" ]; then
+            pass "(15) ${acct}: '${subj}' is permitted ('${puser}' grant: ${permitted}) and captured by NO stream filter"
+        else
+            fail "(15) ${acct}: '${subj}' is uncaptured yet the run printed an attribution note"
+            probe_bad=$((probe_bad + 1))
+        fi
+    fi
+done
+chk "${probe_bad}" "(15) every account's probe subject obeys the PROBE-SUBJECT LAW" \
+    "(15) ${probe_bad} probe-subject verdict(s) failed"
+# The ONLY accounts allowed to keep a captured subject are the two whose grants
+# contain no uncaptured subject at all: guardkit may publish only
+# memory.episode.>, mark only finproxy.>. A third name here means a curable
+# probe was left in a stream.
+same "${captured_accounts}" "MARK GUARDKIT " \
+    "(15) exactly MARK + GUARDKIT keep a captured subject (their grants allow nothing else)" \
+    "(15) the set of stream-captured probe accounts changed — a curable probe is landing in a stream"
 
 # ---------------------------------------------------------------------------
 # no-daemon audit (the whole run).

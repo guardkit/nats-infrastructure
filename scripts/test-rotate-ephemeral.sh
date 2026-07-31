@@ -20,6 +20,10 @@
 #
 # WHAT IT ASSERTS:
 #   (i)   dry-run makes NO mutation (env-file hash unchanged, docker ps unchanged)
+#         + the shapes it EMITS work as written: the [FREEZE] step carries its
+#         credentials as an env assignment prefix inside `sops exec-env`, and the
+#         [RE-RENDER] step names the compose SERVICE (--compose-service), never
+#         the --container value (the two 2026-07-31 live-rotation defects)
 #   (ii)  --execute --restart-mode external rotates one scratch account and the
 #         script's R2a / R2 / R3 gates all PASS (the harness performs the recreate
 #         when the script signals ROTATE-EXTERNAL-RECREATE-NOW)
@@ -36,6 +40,15 @@
 # remains the PLAINTEXT-path proof and needs a live docker daemon + the scratch
 # image; the sops path's proof is `test-rotate-sops-fixture.sh` (no daemons at
 # all). Not re-run at the S1 landing — the S1 lane was fenced off docker.
+#
+# 2026-07-31 (rotate follow-up): the live rotations found a service-vs-container
+# conflation on the compose-recreate path and a credential-less emitted [FREEZE]
+# step. The EXECUTED compose-recreate path is proven in test-rotate-sops-fixture
+# §(13c) under recording shims — deliberately NOT here: this harness's isolation
+# fence bans `docker compose` outright (it would touch the real compose project),
+# and that fence outranks the coverage. What this file adds is the EMITTED-shape
+# check on the same dry-run it already performs. Also not re-run at that landing
+# (the follow-up lane was fenced off docker as well).
 #
 # USAGE:
 #   test-rotate-ephemeral.sh [--runid <id>] [--work-root <dir>]
@@ -214,8 +227,13 @@ HASH_BEFORE="$(sha256sum "${SCRATCH_ENV}" | awk '{print $1}')"
 PS_DRY_BEFORE="$(docker ps -a --format '{{.ID}}' | sort)"
 DRYLOG="${SCRATCH}/dry.log"
 DRY_NEW="$(gen)"   # alnum, satisfies the charset guard
+# --compose-service is passed a DISTINCTIVE value so the emitted-shape checks
+# below can tell a plumbed-through service name from the container name. It
+# changes nothing this run does: --restart-mode stays `external`, so no compose
+# verb is ever reached (the isolation fence bans `docker compose` here).
 if printf '%s\n%s\n' "${DRY_NEW}" "${SCRATCH_PW[RICH]}" | \
         "${ROTATE}" --account "${ACCOUNT}" --live --container "${CNAME}" \
+        --compose-service scratch-svc \
         --source plaintext --env-file "${SCRATCH_ENV}" --register-page "${REGISTER_PAGE}" \
         > "${DRYLOG}" 2>&1; then
     if grep -q "DRY-RUN complete" "${DRYLOG}"; then
@@ -231,6 +249,31 @@ HASH_AFTER_DRY="$(sha256sum "${SCRATCH_ENV}" | awk '{print $1}')"
 if [ "${HASH_BEFORE}" = "${HASH_AFTER_DRY}" ]; then pass "env-file unchanged by dry-run"; else fail "env-file CHANGED during dry-run"; fi
 PS_DRY_AFTER="$(docker ps -a --format '{{.ID}}' | sort)"
 if [ "${PS_DRY_BEFORE}" = "${PS_DRY_AFTER}" ]; then pass "no docker state change during dry-run"; else fail "docker state changed during dry-run"; fi
+
+# --- the EMITTED runbook shapes (2026-07-31 defects 1 + 2) -------------------
+# A runbook step this script prints is a step Rich pastes into a live attended
+# window: it must work AS WRITTEN, and it must obey the same creds laws as an
+# executed one.
+if grep -Fq -- "'NATS_USER=forge NATS_PASSWORD=\"\$FORGE_NATS_PASSWORD\" nats consumer info PIPELINE forge-serve" "${DRYLOG}"; then
+    pass "emitted [FREEZE] step carries creds as an env assignment prefix inside sops exec-env"
+else
+    fail "emitted [FREEZE] step has no credentials — as written it dies with Authorization Violation"
+fi
+if grep -Fq -- "up -d --force-recreate scratch-svc'" "${DRYLOG}"; then
+    pass "--compose-service reaches the emitted recreate line (compose SERVICE key)"
+else
+    fail "--compose-service did not reach the emitted recreate line"
+fi
+if grep -F -- '--force-recreate' "${DRYLOG}" | grep -Fq -- "${CNAME}"; then
+    fail "the CONTAINER name was emitted on a compose --force-recreate line (service/container conflation)"
+else
+    pass "no emitted compose --force-recreate line carries the container name"
+fi
+if grep -Fq "probe     : publish to 'probe.rich'" "${DRYLOG}"; then
+    pass "the run announces its probe subject (probe.rich — matched by no stream filter)"
+else
+    fail "the run did not announce its probe subject"
+fi
 
 # =======================================
 # Phase (ii) — execute (external): harness performs the recreate on signal.

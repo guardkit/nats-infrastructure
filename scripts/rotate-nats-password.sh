@@ -46,8 +46,25 @@
 #     0600 temp under /run/user/$UID (the caller's private tmpfs), registered
 #     in a trap that `shred -u`s it on EXIT/INT/TERM. Never /tmp, never
 #     /dev/shm, never the secrets root, never a repo.
+#   - EMITTED-RUNBOOK LAW (2026-07-31 live receipt): a runbook step this script
+#     PRINTS obeys the same laws as one it RUNS, and must work as written. A
+#     step that needs a credential carries it as an assignment PREFIX inside the
+#     `sops exec-env … '<command>'` quoted command — the inner shell that
+#     exec-env starts consumes the prefix into the child's ENVIRONMENT, so
+#     nothing reaches argv and nothing is displayed. The 07-31 rotations found
+#     the [FREEZE] step emitted with NO credentials at all: as written it failed
+#     with 'Authorization Violation', mid-attended-window.
 #   - PROBE-HARNESS LAW: capture `rc=$?` on the line after the probed command,
 #     BEFORE any `$(…)` substitution (the Wave-2 false alarm).
+#   - PROBE-SUBJECT LAW (2026-07-31 live receipt): a probe publish must land on a
+#     subject the account is PERMITTED to publish to AND that NO JetStream stream
+#     filter captures. A captured probe is not a no-op: it is PERSISTED (MEMORY
+#     keeps 365d) and, if a durable consumer's filter matches, DELIVERED to a
+#     live service — the 07-31 GUARDKIT probe made the fleet-memory-relay log a
+#     ValidationError per rotation. Where an account's grants allow ONLY
+#     stream-captured subjects, the subject STAYS and the script says so LOUDLY
+#     (see PROBE_CAPTURE below), so the operator can attribute the message/error
+#     to the rotation instead of chasing a phantom incident.
 #   - No inline `#` comments are ever written into an encrypted dotenv file
 #     (`sops exec-env` does not strip them; they pollute values).
 #
@@ -91,9 +108,25 @@
 #     --no-consumer-sync        never rewrite consumer enc files (runbook only)
 #   Live actions (all default OFF):
 #     --live                    permit docker/nats/systemd verbs (requires --container)
-#     --container <name>        target broker container (NO default)
+#     --container <name>        target broker CONTAINER name (NO default) — the
+#                               string `docker inspect` resolves (R0 + every
+#                               probe's bridge-IP lookup), e.g.
+#                               ships-computer-nats. NEVER handed to compose.
 #     --restart-mode <compose-recreate|external>   default external
 #     --compose-file <path>     compose file for compose-recreate mode
+#     --compose-service <name>  compose SERVICE key. REQUIRED by --restart-mode
+#                               compose-recreate (hard error if absent — there is
+#                               NO usable default, because guessing is exactly the
+#                               defect). A compose SERVICE name and a CONTAINER
+#                               name are different strings: this repo's
+#                               docker-compose.yml maps service `nats` ->
+#                               container_name `ships-computer-nats`. Passing the
+#                               container name to `docker compose up -d
+#                               --force-recreate` fails with 'no such service'
+#                               (2026-07-31 live receipt) — hence the split.
+#                               In `external` mode nothing here is executed; the
+#                               value only labels the printed [RE-RENDER] step,
+#                               which falls back to this repo's own key 'nats'.
 #     --skip-freeze-check       skip the JetStream Ack-Pending-0 gate (loud)
 #     --poll-timeout <seconds>  wait for the recreate (default 60)
 #   Other:
@@ -122,6 +155,17 @@ ENV_FILE="${REPO_ROOT}/.env"
 REGISTER_PAGE="${SCRIPT_DIR}/../../ai-transition/docs/secrets-register/PAGE-nats.md"
 RESTART_MODE="external"
 COMPOSE_FILE="${REPO_ROOT}/docker-compose.yml"
+# The compose SERVICE key — deliberately NOT ${CONTAINER}. docker-compose.yml
+# declares `services: nats:` with `container_name: ships-computer-nats`, so the
+# two names differ and only the service one is meaningful to `docker compose`.
+#
+# This value is a RUNBOOK-DISPLAY fallback only (this repo's own service key).
+# It is NEVER accepted as the thing compose is actually driven with: the
+# compose-recreate path demands the flag explicitly, tracked by the separate
+# _GIVEN flag below, because a defaulted service name is a guess and guessing
+# the wrong name is precisely the 2026-07-31 defect.
+COMPOSE_SERVICE="nats"
+COMPOSE_SERVICE_GIVEN="false"
 SKIP_FREEZE="false"
 POLL_TIMEOUT="60"
 EXECUTE="false"
@@ -186,6 +230,7 @@ while [ "$#" -gt 0 ]; do
         --register-page)  REGISTER_PAGE="${2:-}"; shift 2 ;;
         --restart-mode)   RESTART_MODE="${2:-}"; shift 2 ;;
         --compose-file)   COMPOSE_FILE="${2:-}"; shift 2 ;;
+        --compose-service) COMPOSE_SERVICE="${2:-}"; COMPOSE_SERVICE_GIVEN="true"; shift 2 ;;
         --poll-timeout)   POLL_TIMEOUT="${2:-}"; shift 2 ;;
         --source)         SOURCE_MODE="${2:-}"; shift 2 ;;
         --secrets-root)   SECRETS_ROOT="${2:-}"; shift 2 ;;
@@ -216,6 +261,28 @@ case "${RESTART_MODE}" in
     compose-recreate|external) ;;
     *) die "--restart-mode must be compose-recreate or external" ;;
 esac
+# SERVICE-vs-CONTAINER FENCE (2026-07-31 live receipt). Before this split,
+# compose-recreate handed ${CONTAINER} — a docker CONTAINER name, which R0 and
+# every probe's bridge-IP lookup genuinely need — to `docker compose up -d
+# --force-recreate`, which resolves its argument against the compose file's
+# `services:` keys. One flag carried two meanings; the mode was unusable and all
+# eight 07-31 rotations ran --restart-mode external instead.
+#
+# compose-recreate therefore REQUIRES --compose-service. No default is applied on
+# this path: the only default available is this repo's key, and silently assuming
+# it on somebody else's compose file re-creates the same class of bug one level
+# down. external mode is unaffected — it executes no compose verb at all.
+if [ "${RESTART_MODE}" = "compose-recreate" ]; then
+    [ "${COMPOSE_SERVICE_GIVEN}" = "true" ] || die "--restart-mode compose-recreate requires --compose-service <name>.
+  That is the compose SERVICE key — the name under 'services:' in ${COMPOSE_FILE} (in this repo: 'nats').
+  It is NOT --container, which is the docker CONTAINER name (in this repo: 'ships-computer-nats') and stays
+  in use for gate R0 and the probes' IP lookup. 'docker compose up -d --force-recreate <container-name>'
+  answers 'no such service'. Pass both flags, or use --restart-mode external and recreate it yourself."
+fi
+# An empty service name would silently widen `up -d --force-recreate` to EVERY
+# service in the project — a fleet-wide recreate from a typo. Refuse it.
+[ -n "${COMPOSE_SERVICE}" ] || \
+    die "--compose-service must not be empty (it is the compose SERVICE key, not the container name)"
 if [ "${LIVE}" = "true" ]; then
     [ -n "${CONTAINER}" ] || die "--live requires --container (no default) — refusing to guess a live target"
 else
@@ -240,25 +307,113 @@ if [ "${SOURCE_MODE}" = "auto" ]; then
 fi
 
 # ---------------------------------------------------------------------------
-# Per-account map (VALUES cited from config/accounts/accounts.conf.template @
-# nats-infrastructure f008c05). For each account: the NATS username, the
-# password ref-name (the env-file / enc-file key), and a subject the user is
-# PERMITTED to publish to (so a successful publish means auth passed, not
-# perm-denied). The RF (restart-freeze) column names the JetStream durable a
-# broker recreate could freeze mid-ack; empty = no durable, RF is N/A.
+# Per-account map. For each account: the NATS username, the password ref-name
+# (the env-file / enc-file key), and a subject the user is PERMITTED to publish
+# to (so a successful publish means auth passed, not perm-denied). The RF
+# (restart-freeze) column names the JetStream durable a broker recreate could
+# freeze mid-ack; empty = no durable, RF is N/A.
+#
+# PERMISSIONS are cited from config/accounts/accounts.conf.template (the file
+# the entrypoint renders into accounts.conf on every container start).
+# STREAM FILTERS are cited from streams/stream-definitions.json — the full set
+# at this commit, which is what "captured" is decided against:
+#     PIPELINE       pipeline.>                       (stream-definitions.json:5)
+#     AGENTS         agents.>                         (stream-definitions.json:16)
+#     JARVIS         jarvis.>                         (stream-definitions.json:27)
+#     NOTIFICATIONS  notifications.>                  (stream-definitions.json:38)
+#     SYSTEM         system.>                         (stream-definitions.json:49)
+#     FLEET          fleet.>                          (stream-definitions.json:60)
+#     MEMORY         memory.episode.> memory.dlq.>    (stream-definitions.json:71)
+#     FINPROXY       finproxy.>                       (stream-definitions.json:83)
+# plus each KV bucket's implicit KV_<bucket> stream on $KV.<bucket>.>
+# (stream-definitions.json:92-113).
+#
+# PROBE_CAPTURE is EMPTY when the chosen subject misses every filter above (the
+# required outcome). When an account's publish grants contain NO uncaptured
+# subject, PROBE_CAPTURE names the capturing stream and PROBE_CAPTURE_DETAIL
+# explains the consequence — emit_probe_attribution then says so LOUDLY in the
+# banner, in the probe output and in the runbook (PROBE-SUBJECT LAW).
+# `$JS.>` / `$KV.>` are NEVER probe subjects even where a user may publish them:
+# a publish there is a JetStream/KV API CALL, not an inert message.
 # ---------------------------------------------------------------------------
+PROBE_CAPTURE=""
+PROBE_CAPTURE_DETAIL=""
 case "${ACCOUNT}" in
+    # admin's user carries NO permissions block (accounts.conf.template:202-206)
+    # and lives in SYS, which has no `jetstream:` line at all
+    # (accounts.conf.template:201-208) — no stream can exist in that account, and
+    # no filter above matches admin.> in any case. UNCAPTURED, kept.
     ADMIN)         PROBE_USER="admin";        PROBE_SUBJECT="admin.sec.probe";          RF_STREAM="";         RF_DURABLE="" ;;
+    # rich publishes ">" (accounts.conf.template:40) — free choice. `probe.rich`
+    # matches no filter above (there is no PROBE stream). UNCAPTURED, kept.
     RICH)          PROBE_USER="rich";         PROBE_SUBJECT="probe.rich";               RF_STREAM="";         RF_DURABLE="" ;;
+    # james publishes ">" (accounts.conf.template:48). Same reasoning as rich.
     JAMES)         PROBE_USER="james";        PROBE_SUBJECT="probe.james";              RF_STREAM="";         RF_DURABLE="" ;;
-    MARK)          PROBE_USER="mark";         PROBE_SUBJECT="finproxy.sec.probe";       RF_STREAM="";         RF_DURABLE="" ;;
-    FORGE)         PROBE_USER="forge";        PROBE_SUBJECT="fleet.sec.probe";          RF_STREAM="PIPELINE"; RF_DURABLE="forge-serve" ;;
-    FLEET_MEMORY)  PROBE_USER="fleet-memory"; PROBE_SUBJECT="memory.dlq.sec.probe";     RF_STREAM="MEMORY";   RF_DURABLE="fleet-memory-relay" ;;
-    GUARDKIT)      PROBE_USER="guardkit";     PROBE_SUBJECT="memory.episode.sec.probe"; RF_STREAM="";         RF_DURABLE="" ;;
-    JARVIS)        PROBE_USER="jarvis";       PROBE_SUBJECT="jarvis.sec.probe";         RF_STREAM="";         RF_DURABLE="" ;;
+    # mark's ONLY publish grant is finproxy.> (accounts.conf.template:189) and
+    # the FINPROXY stream filters exactly finproxy.> (stream-definitions.json:83)
+    # — there is NO permitted subject outside a stream filter, so the subject
+    # stays and the attribution note carries the cost instead.
+    MARK)          PROBE_USER="mark";         PROBE_SUBJECT="finproxy.sec.probe";       RF_STREAM="";         RF_DURABLE=""
+                   PROBE_CAPTURE="FINPROXY"
+                   PROBE_CAPTURE_DETAIL="mark may publish ONLY finproxy.> (accounts.conf.template:189), and the FINPROXY
+stream filters exactly finproxy.> (stream-definitions.json:83) — this user has NO
+permitted subject outside a stream filter, so the probe cannot be moved.
+FINPROXY is work-retention (stream-definitions.json:84) with no consumer, so the
+message is delivered to nobody and ages out at max_age 24h (…json:85)." ;;
+    # WAS fleet.sec.probe — captured by the FLEET stream (stream-definitions.json:60).
+    # forge also publishes runbook.> (accounts.conf.template:69), and NO stream
+    # filters runbook.> — an uncaptured, permitted family of its own. Moved here.
+    # (deploy.> at accounts.conf.template:83 is the equally-valid alternative;
+    # runbook.> is preferred because deploy.> carries live dashboard receipts.)
+    FORGE)         PROBE_USER="forge";        PROBE_SUBJECT="runbook.sec.probe";        RF_STREAM="PIPELINE"; RF_DURABLE="forge-serve" ;;
+    # WAS memory.dlq.sec.probe — captured by MEMORY (stream-definitions.json:71),
+    # which keeps 365d, so every rotation left junk in the canonical memory store.
+    # fleet-memory's publish grants are memory.dlq.> · $JS.> · _INBOX.>
+    # (accounts.conf.template:106). $JS.> is the JetStream API (never a probe),
+    # leaving _INBOX.> — permitted, and matched by no stream filter. It is also
+    # undeliverable to a real client: NATS request-reply subscribes to
+    # `_INBOX.<nuid>.*`, and 'sec' can never be a nuid, so this lands nowhere.
+    FLEET_MEMORY)  PROBE_USER="fleet-memory"; PROBE_SUBJECT="_INBOX.sec.probe";         RF_STREAM="MEMORY";   RF_DURABLE="fleet-memory-relay" ;;
+    # guardkit's ONLY publish grant is memory.episode.> (accounts.conf.template:124
+    # — deliberately a publisher-only identity), which MEMORY filters
+    # (stream-definitions.json:71) AND the durable pull consumer
+    # 'fleet-memory-relay' consumes (accounts.conf.template:100 /
+    # stream-definitions.json:78). There is no permitted uncaptured subject:
+    # the subject stays and the attribution note carries the cost.
+    GUARDKIT)      PROBE_USER="guardkit";     PROBE_SUBJECT="memory.episode.sec.probe"; RF_STREAM="";         RF_DURABLE=""
+                   PROBE_CAPTURE="MEMORY"
+                   PROBE_CAPTURE_DETAIL="guardkit may publish ONLY memory.episode.> (accounts.conf.template:124), which
+MEMORY filters (stream-definitions.json:71) — this user has NO permitted subject
+outside a stream filter, so the probe cannot be moved.
+The LIVE durable 'fleet-memory-relay' consumes memory.episode.> and WILL log
+exactly ONE ValidationError per probe (2026-07-31 live receipt) — the probe
+payload is not an episode. Expect that error; do not chase it.
+MEMORY keeps 365d (stream-definitions.json:73), so the message persists." ;;
+    # WAS jarvis.sec.probe — captured by the JARVIS stream (stream-definitions.json:27).
+    # Every other jarvis publish family is captured too: agents.> (…:16), fleet.>
+    # (…:60), notifications.> (…:38), memory.episode.jarvis.> (…:71),
+    # pipeline.*-queued.> (…:5); $JS.>/$KV.> are API subjects. That leaves
+    # _INBOX.> (accounts.conf.template:165) — permitted and uncaptured.
+    JARVIS)        PROBE_USER="jarvis";       PROBE_SUBJECT="_INBOX.sec.probe";         RF_STREAM="";         RF_DURABLE="" ;;
     *) die "--account must be one of ADMIN RICH JAMES MARK FORGE FLEET_MEMORY GUARDKIT JARVIS" ;;
 esac
 VAR_NAME="${ACCOUNT}_NATS_PASSWORD"
+
+# Loud, non-secret attribution for the two accounts whose grants leave no
+# uncaptured subject. Prints NOTHING for the uncaptured majority, so its presence
+# in a log always means "this rotation deliberately deposited one message".
+# $1 = an indent string (the runbook nests deeper than the banner).
+emit_probe_attribution() {
+    local indent="${1:-}" line
+    [ -n "${PROBE_CAPTURE}" ] || return 0
+    echo "${indent}!! PROBE ATTRIBUTION: '${PROBE_SUBJECT}' IS captured by the ${PROBE_CAPTURE} JetStream stream."
+    echo "${indent}   Each ${ACCOUNT} auth probe (R2a/R2/R3) therefore lands ONE benign message in ${PROBE_CAPTURE}."
+    while IFS= read -r line; do
+        [ -n "${line}" ] || continue
+        echo "${indent}   ${line}"
+    done < <(printf '%s\n' "${PROBE_CAPTURE_DETAIL}")
+    echo "${indent}   EXPECTED + attributable to this rotation — not an incident."
+}
 
 # The broker recreate is ALWAYS gated on PIPELINE/forge-serve Ack-Pending-0 —
 # it drops every client for ~2s, exactly as a forge-prod recreate does
@@ -266,6 +421,12 @@ VAR_NAME="${ACCOUNT}_NATS_PASSWORD"
 # per-account RF_DURABLE above is the account's OWN durable.
 BROKER_FREEZE_STREAM="PIPELINE"
 BROKER_FREEZE_DURABLE="forge-serve"
+# The identity that READS that consumer in the emitted runbook step. forge owns
+# the durable and holds $JS.> (accounts.conf.template:84), so `nats consumer
+# info` is answered for it. The REF is a variable NAME (never a value) and is a
+# key of the broker authority file, so it resolves inside `sops exec-env`.
+BROKER_FREEZE_USER="forge"
+BROKER_FREEZE_PW_REF="FORGE_NATS_PASSWORD"
 
 echo "======================================="
 echo "  rotate-nats-password.sh"
@@ -278,8 +439,14 @@ else
 fi
 echo "  host rows : ${THIS_HOST}  (consumer sync: ${CONSUMER_SYNC})"
 echo "  live      : ${LIVE}$([ "${LIVE}" = "true" ] && echo "  container ${CONTAINER} (${RESTART_MODE})" || echo "  (no docker/nats/systemd verb will run)")"
+if [ "${RESTART_MODE}" = "compose-recreate" ]; then
+    echo "  compose   : service '${COMPOSE_SERVICE}' in ${COMPOSE_FILE}"
+    echo "              (SERVICE key — distinct from the CONTAINER name used by R0/the probes)"
+fi
+echo "  probe     : publish to '${PROBE_SUBJECT}'$([ -n "${PROBE_CAPTURE}" ] && echo "  [captured by ${PROBE_CAPTURE} — see below]" || echo "  (no JetStream stream filter matches it)")"
 echo "  write     : $([ "${EXECUTE}" = "true" ] && echo EXECUTE || echo DRY-RUN)"
 echo "======================================="
+emit_probe_attribution "  "
 if [ "${SOURCE_MODE}" = "plaintext" ]; then
     echo ""
     if [ -n "${AUTO_NOTE}" ]; then
@@ -732,10 +899,28 @@ emit_broker_runbook() {
     echo "  [FREEZE] Ack-Pending-0 gate — the broker recreate drops EVERY client for ~2s;"
     echo "           a recreate with an outstanding ack freezes the build queue for ack_wait (1h)"
     echo "           and a second restart does NOT clear it (broker-side timer)."
-    echo "             ${wrapper_cd} 'nats consumer info ${BROKER_FREEZE_STREAM} ${BROKER_FREEZE_DURABLE} --server nats://127.0.0.1:4222'"
+    # EMITTED-RUNBOOK LAW: this line must WORK AS PRINTED. `nats consumer info`
+    # against an account-scoped broker needs a credential; emitted bare (as it was
+    # until 2026-07-31) it dies with 'Authorization Violation' mid-window. The
+    # creds ride as an assignment PREFIX *inside* the exec-env quoted command, so
+    # the shell exec-env starts consumes them into the nats CLI's ENVIRONMENT —
+    # nothing on argv, nothing displayed, no creds-in-URL. `\$` keeps the
+    # variable reference LITERAL here: it is expanded at operator time by that
+    # inner shell, out of the decrypted broker env, and never by this script.
+    echo "             ${wrapper_cd} \\"
+    echo "               'NATS_USER=${BROKER_FREEZE_USER} NATS_PASSWORD=\"\$${BROKER_FREEZE_PW_REF}\" nats consumer info ${BROKER_FREEZE_STREAM} ${BROKER_FREEZE_DURABLE} --server nats://127.0.0.1:4222'"
     echo "           MUST show 'Ack Pending: 0' / 'Outstanding Acks: 0'."
     echo "           Creds via NATS_USER/NATS_PASSWORD env ONLY — never on argv, and NEVER"
     echo "           embedded in a URL handed to a chatty CLI (the 2026-07-30 display exposure)."
+    echo "           \$${BROKER_FREEZE_PW_REF} comes from the sops exec-env child env: keep it"
+    echo "           inside the single-quoted command, never expanded into your own shell."
+    if [ "${ACCOUNT}" = "FORGE" ]; then
+        echo "           ⚠ ROTATING FORGE ITSELF: once --execute has run, ${ENC_FILE} holds the NEW"
+        echo "             forge password while the RUNNING broker still knows the OLD one, so the"
+        echo "             line above would be REFUSED. Take the freeze reading BEFORE the write"
+        echo "             (a dry run prints this same block), or substitute the OLD credential by"
+        echo "             hand — still as an env assignment prefix, never on argv."
+    fi
     if [ -n "${RF_DURABLE}" ]; then
         echo "           Also this account's own durable: ${RF_STREAM}/${RF_DURABLE} Ack-Pending 0."
     fi
@@ -743,15 +928,24 @@ emit_broker_runbook() {
     echo "  [RE-RENDER] ONE broker recreate (the §10.4 carve-out: never two — each is a"
     echo "              fleet-wide drop + another freeze cycle):"
     echo "             ${wrapper_cd} \\"
-    echo "               'docker compose -f ${COMPOSE_FILE} --project-directory ${REPO_ROOT} up -d --force-recreate nats'"
+    echo "               'docker compose -f ${COMPOSE_FILE} --project-directory ${REPO_ROOT} up -d --force-recreate ${COMPOSE_SERVICE}'"
     echo "              (a bare 'up -d' fails loudly since c6820ed; a value-identical config makes"
     echo "               a non-forced 'up -d' a silent no-op — --force-recreate is the verb)"
+    echo "              '${COMPOSE_SERVICE}' is the compose SERVICE key (--compose-service), NOT a"
+    echo "              container name: this project maps service 'nats' -> container"
+    echo "              'ships-computer-nats', and compose answers a container name with"
+    echo "              'no such service' (2026-07-31 live receipt)."
+    if [ "${COMPOSE_SERVICE_GIVEN}" != "true" ]; then
+        echo "              (no --compose-service was passed, so this line shows THIS repo's own"
+        echo "               services: key — confirm it against ${COMPOSE_FILE} before pasting.)"
+    fi
     echo "              Expect the entrypoint log: 'Processed: …accounts.conf.template -> …accounts.conf'."
     echo ""
     echo "  [R2a] wrong-credential REFUSED (gate-of-the-gate; a vacuous auth path invalidates R2/R3)."
     echo "  [R2 ] the NEW ${ACCOUNT} credential authenticates as nats user '${PROBE_USER}'"
     echo "        (quiet publish to '${PROBE_SUBJECT}', creds via env) + curl :8222/connz?auth=1"
     echo "        reconverges to baseline with zero Authorization Violations."
+    emit_probe_attribution "        "
     echo "  [R3 ] the OLD credential is REFUSED (Authorization Violation) — a scratch client,"
     echo "        quiet shape, creds via env, never a creds-in-URL."
     echo "  [R4 ] every consumer copy below carries the new value, then each consumer restarts."
@@ -908,7 +1102,9 @@ if [ "${EXECUTE}" != "true" ]; then
     if [ "${LIVE}" = "true" ]; then
         if [ "${RESTART_MODE}" = "compose-recreate" ]; then
             echo "  4. WOULD recreate the container (OPERATOR path):"
-            echo "       docker compose -f ${COMPOSE_FILE} --project-directory ${REPO_ROOT} up -d --force-recreate ${CONTAINER}"
+            echo "       docker compose -f ${COMPOSE_FILE} --project-directory ${REPO_ROOT} up -d --force-recreate ${COMPOSE_SERVICE}"
+            echo "       (compose is given the SERVICE '${COMPOSE_SERVICE}'; '${CONTAINER}' stays the CONTAINER name,"
+            echo "        used only by GATE R0 and the probes' bridge-IP lookup)"
         else
             echo "  4. WOULD signal the invoker to recreate '${CONTAINER}' (external mode), then wait for the new credential."
         fi
@@ -1000,12 +1196,17 @@ fi
 
 if [ "${RESTART_MODE}" = "compose-recreate" ]; then
     # OPERATOR-ONLY attended path.
-    echo "Recreating via compose (OPERATOR path)..."
+    # SERVICE, NOT CONTAINER (2026-07-31 live receipt): `docker compose up -d
+    # --force-recreate <X>` resolves X against the compose file's `services:`
+    # keys. ${CONTAINER} is a docker CONTAINER name — the string R0 and
+    # resolve_ip need — and compose answers it with 'no such service'. The two
+    # are separate flags for exactly this reason.
+    echo "Recreating via compose (OPERATOR path): service '${COMPOSE_SERVICE}' (container '${CONTAINER}')..."
     if [ "${SOURCE_MODE}" = "sops" ]; then
         ( cd "${SECRETS_ROOT}" && "${SOPS_BIN}" exec-env "${ENC_FILE}" \
-            "docker compose -f '${COMPOSE_FILE}' --project-directory '${REPO_ROOT}' up -d --force-recreate '${CONTAINER}'" )
+            "docker compose -f '${COMPOSE_FILE}' --project-directory '${REPO_ROOT}' up -d --force-recreate '${COMPOSE_SERVICE}'" )
     else
-        docker compose -f "${COMPOSE_FILE}" --project-directory "${REPO_ROOT}" up -d --force-recreate "${CONTAINER}"
+        docker compose -f "${COMPOSE_FILE}" --project-directory "${REPO_ROOT}" up -d --force-recreate "${COMPOSE_SERVICE}"
     fi
 else
     # external: the invoker performs the recreate; we gate+probe around it.
@@ -1029,6 +1230,10 @@ fi
 # GATE R2a — gate-of-the-gate: a WRONG password MUST be refused. If it is not,
 # the auth path is vacuous and R2/R3 would prove nothing — abort.
 # ---------------------------------------------------------------------------
+# PROBE-SUBJECT LAW: say it again HERE, immediately before the publishes that
+# actually deposit the message — this block is the probe output an operator
+# greps when a downstream service logs something odd a minute later.
+emit_probe_attribution "  "
 xtrace_off
 r2a_rc=0
 probe_pub "${WRONG_PW}" || r2a_rc=$?
