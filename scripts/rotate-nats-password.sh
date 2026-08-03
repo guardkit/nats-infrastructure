@@ -217,7 +217,9 @@ JARVIS|gb10|slack-jarvis/jarvis.enc.env|plain:JARVIS_NATS_PASSWORD|req|jarvis da
 FLEET_MEMORY|gb10|fleet-memory-pg/relay-env-deploy.enc.env|url:FLEET_MEMORY_NATS_URL|req|fleet-memory-relay (PAGE-nats 3.3 row 1 / PAGE-fleet-memory-pg 10.3): sops exec-env … 'docker compose up -d --force-recreate' from deploy/relay — the Created timestamp MUST change
 FLEET_MEMORY|gb10|fleet-memory-pg/fleet-memory-root.enc.env|url:FLEET_MEMORY_NATS_URL|req|fleet-memory root reader (PAGE-nats 3.3 row 2) — TWICE-STALE copy (PAGE-fleet-memory-pg 9): R4 on this file is mandatory, picked up at next process start
 FLEET_MEMORY|gb10|fleet-memory-pg/guardkit.enc.env|url:FLEET_MEMORY_NATS_URL|req|guardkit reader copy (PAGE-nats 3.3 row 3) — next guardkit process start
-GUARDKIT|gb10|fleet-memory-pg/guardkit.enc.env|plain:GUARDKIT_NATS_PASSWORD|opt|PAGE-nats 3.4 + 8 DISCOVERY: no on-disk consumer copy was found in the 07-11 sweep — if the key is absent this is a SKIP, and the invoking env of the harvest publisher is still the open cell"
+FLEET_MEMORY|gb10|fleet-memory-pg/leg-env.enc.env|url:FLEET_MEMORY_NATS_URL|req|factory build legs (PAGE-nats 3.3 row 4, ADDED 2026-08-03, memory-reconnection Act 1): the sidecar sops exec-env drop-in — systemctl --user restart forge-langgraph-sidecar
+GUARDKIT|gb10|fleet-memory-pg/guardkit.enc.env|plain:GUARDKIT_NATS_PASSWORD|opt|PAGE-nats 3.4 + 8 DISCOVERY (RESOLVED 2026-08-03 — the invoking env is the sidecar leg-env, next row): this file's own key stays mapped-but-unverified; absence = SKIP
+GUARDKIT|gb10|fleet-memory-pg/leg-env.enc.env|plain:GUARDKIT_NATS_PASSWORD|req|harvest publisher via the sidecar leg env (PAGE-nats 3.4 row 2, ADDED 2026-08-03, memory-reconnection Act 2) — systemctl --user restart forge-langgraph-sidecar"
 
 # ---------------------------------------------------------------------------
 # Parse arguments (no secret ever arrives on argv)
