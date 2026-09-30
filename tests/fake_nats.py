@@ -12,6 +12,14 @@ Environment:
   FAKE_NATS_LOG     file that receives one JSON argv list per invocation
   FAKE_NATS_FAIL    comma-separated verbs that fail, e.g. "kv edit,stream info"
   FAKE_NATS_EDIT_NOOP  if set, `kv edit` exits 0 without changing anything
+
+A bucket in the state file may also carry:
+  "max_age_ns"   exact live TTL in nanoseconds (e.g. 500000000), overriding
+                 ttl_s until a --ttl flag rewrites it
+  "stream_info"  the raw `stream info KV_<b> --json` response: a JSON value,
+                 or a string printed verbatim (to simulate a malformed or
+                 partial response)
+  "stream_info_after_edit"  becomes "stream_info" once `kv edit` succeeds
 """
 
 from __future__ import annotations
@@ -81,11 +89,15 @@ def apply_flags(bucket: dict, flags: dict[str, str], allowed: set[str]) -> None:
         bucket["max_value_size"] = to_bytes(flags["--max-value-size"])
     if "--ttl" in flags:
         bucket["ttl_s"] = to_seconds(flags["--ttl"])
+        bucket.pop("max_age_ns", None)
     if "--replicas" in flags:
         bucket["replicas"] = int(flags["--replicas"])
 
 
 def stream_json(name: str, b: dict) -> str:
+    if "stream_info" in b:
+        raw = b["stream_info"]
+        return raw if isinstance(raw, str) else json.dumps(raw)
     return json.dumps(
         {
             "config": {
@@ -93,7 +105,7 @@ def stream_json(name: str, b: dict) -> str:
                 "storage": b["storage"],
                 "max_msgs_per_subject": b["history"],
                 "max_msg_size": b["max_value_size"],
-                "max_age": b["ttl_s"] * 1_000_000_000,
+                "max_age": b.get("max_age_ns", b["ttl_s"] * 1_000_000_000),
                 "num_replicas": b["replicas"],
             },
             "state": {"messages": b.get("messages", 0)},
@@ -136,6 +148,8 @@ def main() -> None:
             fail("bucket not found")
         if not os.environ.get("FAKE_NATS_EDIT_NOOP"):
             apply_flags(buckets[pos[2]], flags, EDIT_FLAGS)
+            if "stream_info_after_edit" in buckets[pos[2]]:
+                buckets[pos[2]]["stream_info"] = buckets[pos[2]].pop("stream_info_after_edit")
         else:
             apply_flags(dict(buckets[pos[2]]), flags, EDIT_FLAGS)
     elif verb == "kv del" and len(pos) == 3:

@@ -91,7 +91,8 @@ documentation, see [`docs/kv-usage.md`](docs/kv-usage.md).
 that already exists it reads the live settings and compares them with the definition:
 
 - history, max value size, TTL and replicas are corrected in place with `nats kv edit`,
-  and the bucket is read again to confirm the change took;
+  and the bucket is read again to confirm the change took (TTL is compared to the
+  nanosecond, so a sub-second TTL on a bucket meant to be persistent counts as drift);
 - a different **storage type** (file vs memory) cannot be edited — the bucket has to be
   deleted and recreated, which loses its values — so the script refuses by default and
   says so. Pass `--recreate <bucket>` to allow exactly that bucket to be recreated.
@@ -106,6 +107,10 @@ that already exists it reads the live settings and compares them with the defini
 # Also allow jarvis-session to be deleted and recreated to change its storage type
 ./kv/provision-kv.sh --recreate jarvis-session
 ```
+
+If the live settings come back incomplete or invalid (a missing or unknown storage type,
+a missing or non-integer history, TTL or replica count), that bucket is reported as an
+error and left untouched — even when `--recreate` names it.
 
 The script exits non-zero if any bucket could not be read, created or corrected, or was
 refused; `--dry-run` exits the same way the real run would.

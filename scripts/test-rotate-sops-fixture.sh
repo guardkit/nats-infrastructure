@@ -68,7 +68,8 @@
 #        config/accounts/accounts.conf.template (an unpermitted subject is
 #        refused asynchronously by a core `nats pub`, so GATE R2 would pass
 #        vacuously) — AND (b) checked against the stream filters PARSED OUT of
-#        streams/stream-definitions.json: an uncaptured subject must carry NO
+#        streams/stream-definitions.json (plus each KV bucket's implicit
+#        $KV.<bucket>.> filter from kv/kv-definitions.json): an uncaptured subject must carry NO
 #        attribution note, a captured one MUST carry a loud one
 #
 # USAGE: test-rotate-sops-fixture.sh [--keep]
@@ -925,9 +926,11 @@ stream_filters() {
 # Every KV bucket is ALSO a stream (KV_<bucket>) whose subject filter is
 # $KV.<bucket>.> — declared by name, never by a "subjects" key, so the parse
 # above cannot see it. A probe on a $KV subject would not merely be persisted:
-# it is a KV API call. Derive those filters too, from the same file.
+# it is a KV API call. Derive those filters too, from kv/kv-definitions.json —
+# the ONLY source of KV buckets (stream-definitions.json no longer lists them).
+KV_DEFS="${SCRIPT_DIR}/../kv/kv-definitions.json"
 kv_filters() {
-    sed -n '/"kv_buckets"/,$p' "${STREAM_DEFS}" \
+    sed -n '/"kv_buckets"/,$p' "${KV_DEFS}" \
         | sed -n "s/.*\"name\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\$KV.\1.>/p"
 }
 # NATS subject matching: '*' = exactly one token · '>' = one-or-more trailing
@@ -950,12 +953,13 @@ subject_matches_filter() {  # $1 subject · $2 filter → 0 = CAPTURED
     return 1
 }
 [ -f "${STREAM_DEFS}" ] || { echo "stream definitions not found: ${STREAM_DEFS}" >&2; exit 2; }
+[ -f "${KV_DEFS}" ] || { echo "KV definitions not found: ${KV_DEFS}" >&2; exit 2; }
 mapfile -t FILTERS < <(stream_filters; kv_filters)
 # Gate-of-the-gate #1: a parse that silently yields nothing would pass every
 # account vacuously. 8 declared streams (one of which lists 2 subjects) + 4 KV
 # buckets = 13 filters; require the full set, not "some".
 if [ "${#FILTERS[@]}" -ge 13 ]; then
-    pass "(15) parsed ${#FILTERS[@]} stream + KV subject filters out of stream-definitions.json"
+    pass "(15) parsed ${#FILTERS[@]} stream + KV subject filters out of stream-definitions.json + kv-definitions.json"
 else
     fail "(15) only ${#FILTERS[@]} filters parsed — the capture check would be vacuous"
 fi

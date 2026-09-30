@@ -17,7 +17,9 @@
 #                                          bucket to be deleted and recreated.
 #
 # Live settings are read with `nats stream info KV_<bucket> --json` (the
-# installed nats CLI has no `nats kv info --json`).
+# installed nats CLI has no `nats kv info --json`). A response with a missing
+# or invalid setting is an [ERROR] for that bucket and nothing is changed —
+# not even with --recreate. TTL is compared in exact nanoseconds.
 #
 # Safe to run multiple times: on first deploy, on reboot, and after definition changes.
 #
@@ -205,6 +207,18 @@ duration_to_seconds() {
     esac
 }
 
+# Nanoseconds -> "604800s" / "0.5s" (exact: no rounding, so sub-second drift shows)
+format_ns() {
+    local ns="$1" frac
+    if (( ns % 1000000000 == 0 )); then
+        echo "$((ns / 1000000000))s"
+        return 0
+    fi
+    printf -v frac '%09d' $((ns % 1000000000))
+    frac="${frac%"${frac##*[!0]}"}"
+    echo "$((ns / 1000000000)).${frac}s"
+}
+
 # Run a nats command quietly; on failure print its (redacted) error output
 run_nats() {
     local out rc=0
@@ -215,18 +229,58 @@ run_nats() {
     return $rc
 }
 
-# Live settings of a bucket as "storage history max_value_size ttl_seconds replicas messages"
+# Checks a `nats stream info --json` response and prints either
+#   "OK <storage> <history> <max_value_size> <ttl_ns> <replicas> <messages>"
+# or "INVALID <reasons>". Every setting the script compares must be present and
+# well-formed: a missing or unknown value is never read as a difference (that
+# could delete a bucket over a storage type nobody actually established).
+# max_msg_size is the one optional field — the CLI omits it when 0, which the
+# server treats as unlimited (-1). max_age is compared in exact nanoseconds.
+# shellcheck disable=SC2016  # $-names below are jq variables, not shell
+LIVE_JQ='
+def isint: type == "number" and . == floor;
+(if type == "object" then . else {} end) as $r
+| ($r.config | if type == "object" then . else null end) as $c
+| ($r.state | if type == "object" then . else null end) as $s
+| if $c == null then "INVALID no config object"
+  else
+    [ (if $c.name != $stream then "config.name is \($c.name | tojson), expected \($stream | tojson)" else empty end),
+      (if $c.storage == "file" or $c.storage == "memory" then empty else "config.storage is \($c.storage | tojson), expected \"file\" or \"memory\"" end),
+      (if ($c.max_msgs_per_subject | isint) and $c.max_msgs_per_subject >= 1 then empty else "config.max_msgs_per_subject is \($c.max_msgs_per_subject | tojson)" end),
+      (if $c.max_msg_size == null or (($c.max_msg_size | isint) and $c.max_msg_size >= -1) then empty else "config.max_msg_size is \($c.max_msg_size | tojson)" end),
+      (if ($c.max_age | isint) and $c.max_age >= 0 then empty else "config.max_age is \($c.max_age | tojson)" end),
+      (if ($c.num_replicas | isint) and $c.num_replicas >= 1 then empty else "config.num_replicas is \($c.num_replicas | tojson)" end),
+      (if $s != null and ($s.messages | isint) and $s.messages >= 0 then empty else "state.messages is \($s.messages? | tojson)" end)
+    ] as $bad
+    | if ($bad | length) > 0 then "INVALID " + ($bad | join("; "))
+      else "OK " + ([ $c.storage, $c.max_msgs_per_subject,
+                      ($c.max_msg_size // -1 | if . == 0 then -1 else . end),
+                      $c.max_age, $c.num_replicas, $s.messages ]
+                    | map(tostring) | join(" "))
+      end
+  end'
+
+# Live settings of a bucket as "storage history max_value_size ttl_ns replicas messages".
+# Returns 1 if the bucket cannot be read, 2 if the response is not valid
+# settings (reason on stderr). Callers must not change anything on either.
 read_live() {
-    local name="$1" info
+    local name="$1" info checked
     info="$(nats stream info "KV_${name}" --json "${NATS_OPTS[@]}" 2>/dev/null)" || return 1
-    echo "$info" | jq -r '[
-        .config.storage,
-        .config.max_msgs_per_subject,
-        .config.max_msg_size,
-        ((.config.max_age // 0) / 1000000000 | floor),
-        .config.num_replicas,
-        (.state.messages // 0)
-    ] | map(tostring) | join(" ")'
+    if ! checked="$(jq -r --arg stream "KV_${name}" "$LIVE_JQ" <<< "$info" 2>/dev/null)"; then
+        echo "        response is not JSON" >&2
+        return 2
+    fi
+    case "$checked" in
+        "OK "*) checked="${checked#OK }" ;;
+        "INVALID "*) echo "        ${checked#INVALID }" >&2; return 2 ;;
+        *) echo "        unexpected response" >&2; return 2 ;;
+    esac
+    # Belt and braces: exactly six well-formed fields (e.g. no 1e+18 from an old jq)
+    if [[ ! "$checked" =~ ^(file|memory)\ [0-9]+\ -?[0-9]+\ [0-9]+\ [0-9]+\ [0-9]+$ ]]; then
+        echo "        unexpected settings: $checked" >&2
+        return 2
+    fi
+    echo "$checked"
 }
 
 # Names of the buckets that exist on the server, one per line
@@ -277,7 +331,7 @@ create_bucket() {
 confirm_bucket() {
     local name="$1" want="$2" live
     if ! live="$(read_live "$name")"; then
-        echo "[ERROR] KV $name — could not re-read bucket to confirm the change" >&2
+        echo "[ERROR] KV $name — could not re-read valid bucket settings to confirm the change" >&2
         return 1
     fi
     # Compare the five settings; ignore the trailing message count
@@ -321,7 +375,9 @@ provision_kv_bucket() {
         return 0
     fi
 
-    local want="$storage $history $max_bytes $ttl_s $replicas"
+    # TTL is compared in nanoseconds, as the server stores it
+    local ttl_ns=$((ttl_s * 1000000000))
+    local want="$storage $history $max_bytes $ttl_ns $replicas"
     local add_cmd="nats kv add $name --storage $storage --history $history --replicas $replicas"
     [[ "$max_bytes" -ge 0 ]] && add_cmd+=" --max-value-size $max_bytes"
     [[ "$ttl_s" -gt 0 ]] && add_cmd+=" --ttl ${ttl_s}s"
@@ -345,20 +401,25 @@ provision_kv_bucket() {
     fi
 
     # ---- Existing bucket: read and compare ------------------------------
-    local live
-    if ! live="$(read_live "$name")"; then
+    local live rc=0
+    live="$(read_live "$name")" || rc=$?
+    if [[ $rc -eq 2 ]]; then
+        echo "[ERROR] KV $name — nats stream info KV_$name --json returned missing or invalid settings (above); nothing changed" >&2
+        errors=$((errors + 1))
+        return 0
+    elif [[ $rc -ne 0 ]]; then
         echo "[ERROR] KV $name — could not read bucket settings (nats stream info KV_$name --json)" >&2
         errors=$((errors + 1))
         return 0
     fi
 
-    local cur_storage cur_history cur_max_bytes cur_ttl_s cur_replicas cur_msgs
-    read -r cur_storage cur_history cur_max_bytes cur_ttl_s cur_replicas cur_msgs <<< "$live"
+    local cur_storage cur_history cur_max_bytes cur_ttl_ns cur_replicas cur_msgs
+    read -r cur_storage cur_history cur_max_bytes cur_ttl_ns cur_replicas cur_msgs <<< "$live"
 
     local changes=()
     [[ "$cur_history" != "$history" ]] && changes+=("history $cur_history -> $history")
     [[ "$cur_max_bytes" != "$max_bytes" ]] && changes+=("max_value_size $cur_max_bytes -> $max_bytes")
-    [[ "$cur_ttl_s" != "$ttl_s" ]] && changes+=("ttl ${cur_ttl_s}s -> ${ttl_s}s")
+    [[ "$cur_ttl_ns" != "$ttl_ns" ]] && changes+=("ttl $(format_ns "$cur_ttl_ns") -> $(format_ns "$ttl_ns")")
     [[ "$cur_replicas" != "$replicas" ]] && changes+=("replicas $cur_replicas -> $replicas")
 
     # ---- Storage differs: refuse, or delete+recreate when named ---------
@@ -409,7 +470,7 @@ provision_kv_bucket() {
     elif [[ "$cur_max_bytes" != "$max_bytes" ]]; then
         edit_opts+=("--max-value-size=-1")
     fi
-    if [[ "$ttl_s" -gt 0 || "$cur_ttl_s" != "$ttl_s" ]]; then
+    if [[ "$ttl_s" -gt 0 || "$cur_ttl_ns" != "$ttl_ns" ]]; then
         edit_opts+=("--ttl" "${ttl_s}s")
     fi
 

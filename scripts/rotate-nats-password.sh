@@ -326,7 +326,7 @@ fi
 #     MEMORY         memory.episode.> memory.dlq.>    (stream-definitions.json:71)
 #     FINPROXY       finproxy.>                       (stream-definitions.json:83)
 # plus each KV bucket's implicit KV_<bucket> stream on $KV.<bucket>.>
-# (stream-definitions.json:92-113).
+# (buckets defined in kv/kv-definitions.json, their only source).
 #
 # PROBE_CAPTURE is EMPTY when the chosen subject misses every filter above (the
 # required outcome). When an account's publish grants contain NO uncaptured

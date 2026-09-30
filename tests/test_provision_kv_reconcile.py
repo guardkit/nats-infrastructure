@@ -8,6 +8,8 @@ PATH that keeps bucket state in a JSON file and logs every call). Covers:
 - delete+recreate with --recreate
 - --dry-run changes nothing
 - non-zero exit on any failure
+- TTL compared in exact nanoseconds (sub-second drift is not rounded away)
+- malformed/partial stream info is refused before anything is changed
 - streams/provision-streams.sh no longer touches KV buckets
 """
 
@@ -376,6 +378,172 @@ class TestFailureExitCodes:
         )
         assert "not-a-real-secret" not in result.stdout + result.stderr
         assert "nats://***@fake-host:4222" in result.stdout
+
+
+# =============================================================================
+# TTL is compared in exact nanoseconds, never rounded to whole seconds
+# =============================================================================
+
+
+def _matching(**per_bucket: dict) -> dict:
+    """Every bucket as defined, with per-bucket overrides."""
+    buckets = {n: dict(w, messages=1) for n, w in WANT.items()}
+    for name, overrides in per_bucket.items():
+        buckets[name].update(overrides)
+    return buckets
+
+
+class TestTtlPrecision:
+    def test_sub_second_ttl_on_persistent_bucket_is_drift(self, fake: FakeNats) -> None:
+        # 500ms: floor() to whole seconds used to make this look like "no TTL"
+        fake.seed(_matching(**{"agent-status": {"max_age_ns": 500_000_000}}))
+        result = fake.run(KV_SCRIPT, "--dry-run")
+        assert "Would update KV agent-status: ttl 0.5s -> 0s" in result.stdout
+        assert "[OK] KV agent-status" not in result.stdout
+        assert "nats kv edit agent-status --history 1 --replicas 1 --max-value-size 65536 --ttl 0s" in result.stdout
+
+    def test_sub_second_ttl_is_removed_and_confirmed(self, fake: FakeNats) -> None:
+        fake.seed(_matching(**{"agent-status": {"max_age_ns": 500_000_000}}))
+        result = fake.run(KV_SCRIPT)
+        assert result.returncode == 0, result.stderr
+        assert "[UPDATE] KV agent-status: ttl 0.5s -> 0s" in result.stdout
+        edits = [c for c in fake.writes() if c[:2] == ["kv", "edit"]]
+        assert [c[2] for c in edits] == ["agent-status"]
+        assert edits[0][edits[0].index("--ttl") + 1] == "0s"
+        status = fake.buckets()["agent-status"]
+        assert "max_age_ns" not in status and status["ttl_s"] == 0
+
+    def test_fractional_second_drift_on_ttl_bucket_is_reported(self, fake: FakeNats) -> None:
+        fake.seed(_matching(**{"jarvis-session": {"max_age_ns": 3_600_500_000_000}}))
+        result = fake.run(KV_SCRIPT, "--dry-run")
+        assert "Would update KV jarvis-session: ttl 3600.5s -> 3600s" in result.stdout
+        assert "[OK] KV jarvis-session" not in result.stdout
+
+    def test_nanosecond_drift_is_reported(self, fake: FakeNats) -> None:
+        fake.seed(_matching(**{"pipeline-state": {"max_age_ns": 604_800_000_000_001}}))
+        out = fake.run(KV_SCRIPT, "--dry-run").stdout
+        assert "Would update KV pipeline-state: ttl 604800.000000001s -> 604800s" in out
+
+    def test_confirm_detects_sub_second_residue(self, fake: FakeNats) -> None:
+        # An edit that leaves 500ms behind must not be confirmed as done
+        fake.seed(_matching(**{"agent-status": {"max_age_ns": 500_000_000}}))
+        result = fake.run(KV_SCRIPT, FAKE_NATS_EDIT_NOOP="1")
+        assert result.returncode == 1
+        assert "[ERROR] KV agent-status — still differs after the change" in result.stderr
+
+    def test_exact_ttls_are_current(self, fake: FakeNats) -> None:
+        fake.seed(_matching())
+        result = fake.run(KV_SCRIPT)
+        assert result.returncode == 0, result.stderr
+        assert "4 already current" in result.stdout
+
+
+# =============================================================================
+# Malformed or partial stream info is refused — never read as a difference
+# =============================================================================
+
+
+def _session_info(**config_overrides) -> dict:
+    """A complete stream info response for a file-backed jarvis-session."""
+    info = {
+        "config": {
+            "name": "KV_jarvis-session",
+            "storage": "file",
+            "max_msgs_per_subject": 1,
+            "max_msg_size": 131072,
+            "max_age": 3_600_000_000_000,
+            "num_replicas": 1,
+        },
+        "state": {"messages": 2},
+    }
+    for key, value in config_overrides.items():
+        if value is _DROP:
+            del info["config"][key]
+        else:
+            info["config"][key] = value
+    return info
+
+
+_DROP = object()
+
+MALFORMED_INFO = {
+    "storage-missing": _session_info(storage=_DROP),
+    "storage-null": _session_info(storage=None),
+    "storage-unknown": _session_info(storage="disk"),
+    "history-missing": _session_info(max_msgs_per_subject=_DROP),
+    "history-string": _session_info(max_msgs_per_subject="1"),
+    "ttl-missing": _session_info(max_age=_DROP),
+    "ttl-fractional": _session_info(max_age=1.5),
+    "replicas-missing": _session_info(num_replicas=_DROP),
+    "max-value-size-invalid": _session_info(max_msg_size="128KB"),
+    "wrong-stream": _session_info(name="KV_agent-status"),
+    "state-missing": {"config": _session_info()["config"]},
+    "config-missing": {"state": {"messages": 2}},
+    "empty-object": {},
+    "json-null": "null",
+    "not-json": "nats: this is not json",
+}
+
+
+class TestMalformedStreamInfo:
+    @pytest.fixture(params=sorted(MALFORMED_INFO), ids=sorted(MALFORMED_INFO))
+    def malformed(self, request, fake: FakeNats) -> str:
+        # Every other bucket matches, so ANY write at all is a failure
+        fake.seed(_matching(**{"jarvis-session": {
+            "storage": "file", "messages": 2, "stream_info": MALFORMED_INFO[request.param],
+        }}))
+        return request.param
+
+    def test_refused_with_recreate_and_no_writes(self, fake: FakeNats, malformed: str) -> None:
+        before = fake.state()
+        result = fake.run(KV_SCRIPT, "--recreate", "jarvis-session")
+        assert result.returncode == 1, result.stdout
+        assert "[ERROR] KV jarvis-session — nats stream info KV_jarvis-session --json " \
+               "returned missing or invalid settings" in result.stderr
+        assert fake.writes() == []
+        assert fake.state() == before
+        assert "[RECREATE]" not in result.stdout
+
+    def test_dry_run_plans_no_recreate(self, fake: FakeNats, malformed: str) -> None:
+        result = fake.run(KV_SCRIPT, "--dry-run", "--recreate", "jarvis-session")
+        assert result.returncode == 1
+        assert "Would RECREATE" not in result.stdout
+        assert "Would update KV jarvis-session" not in result.stdout
+        assert "returned missing or invalid settings" in result.stderr
+
+    def test_reason_is_reported(self, fake: FakeNats) -> None:
+        fake.seed(_matching(**{"jarvis-session": {"stream_info": MALFORMED_INFO["storage-missing"]}}))
+        result = fake.run(KV_SCRIPT, "--recreate", "jarvis-session")
+        assert 'config.storage is null, expected "file" or "memory"' in result.stderr
+
+    def test_complete_info_still_recreates(self, fake: FakeNats) -> None:
+        # The same response with every field present is a real storage mismatch
+        fake.seed(_matching(**{"jarvis-session": {
+            "storage": "file", "messages": 2, "stream_info": _session_info(),
+        }}))
+        result = fake.run(KV_SCRIPT, "--recreate", "jarvis-session")
+        assert result.returncode == 0, result.stderr
+        assert "[RECREATE] KV jarvis-session — storage file -> memory" in result.stdout
+        assert _settings(fake.buckets()["jarvis-session"]) == WANT["jarvis-session"]
+
+    def test_absent_max_msg_size_means_unlimited(self, fake: FakeNats) -> None:
+        # The CLI omits max_msg_size when 0, which the server treats as unlimited
+        fake.seed(_matching(**{"jarvis-session": {"stream_info": _session_info(
+            storage="memory", max_msg_size=_DROP)}}))
+        result = fake.run(KV_SCRIPT, "--dry-run")
+        assert result.returncode == 0, result.stderr
+        assert "Would update KV jarvis-session: max_value_size -1 -> 131072" in result.stdout
+
+    def test_invalid_info_on_confirm_is_an_error(self, fake: FakeNats) -> None:
+        # The edit is made, but its re-read is partial: not confirmed as done
+        fake.seed(_matching(**{"agent-status": {
+            "max_value_size": -1,
+            "stream_info_after_edit": {"config": {"name": "KV_agent-status"}},
+        }}))
+        result = fake.run(KV_SCRIPT)
+        assert result.returncode == 1
+        assert "[ERROR] KV agent-status — could not re-read valid bucket settings" in result.stderr
+        assert "[UPDATE] KV agent-status" not in result.stdout
 
 
 # =============================================================================
