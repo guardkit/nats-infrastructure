@@ -6,7 +6,8 @@
 #   1. Validate prerequisites (docker, docker compose)
 #   2. Copy .env.example to .env if it doesn't exist
 #   3. Build and start services via Docker Compose
-#   4. Provision JetStream streams
+#   4. Provision JetStream streams, then KV buckets (kv/provision-kv.sh —
+#      the only script that creates or corrects KV buckets)
 #   5. Verify the NATS server is healthy and streams are provisioned
 #
 # Usage:
@@ -14,7 +15,7 @@
 #
 # Prerequisites:
 #   Required: docker, docker compose
-#   Optional: jq, nats CLI (for stream provisioning)
+#   Optional: jq, nats CLI (for stream and KV bucket provisioning)
 #
 # Exit codes:
 #   0 — Setup completed successfully
@@ -110,19 +111,33 @@ if [[ $elapsed -ge $MAX_WAIT ]]; then
 fi
 
 # ---------------------------------------------------------------------------
-# Step 4: Provision JetStream streams
+# Step 4: Provision JetStream streams, then KV buckets
 # ---------------------------------------------------------------------------
-step 4 "Provision JetStream streams"
+step 4 "Provision JetStream streams and KV buckets"
 
 PROVISION_SCRIPT="$PROJECT_ROOT/streams/provision-streams.sh"
+PROVISION_KV_SCRIPT="$PROJECT_ROOT/kv/provision-kv.sh"
+
+if [[ ! -f "$PROVISION_KV_SCRIPT" ]]; then
+    error "provision-kv.sh not found at $PROVISION_KV_SCRIPT"
+    exit 1
+fi
 
 if [[ -f "$PROVISION_SCRIPT" ]]; then
     if command -v nats >/dev/null 2>&1 && command -v jq >/dev/null 2>&1; then
         info "Running: ./streams/provision-streams.sh"
         "$PROVISION_SCRIPT"
         info "Stream provisioning complete"
+        # KV buckets come only from kv/kv-definitions.json, after the streams
+        info "Running: ./kv/provision-kv.sh"
+        if "$PROVISION_KV_SCRIPT"; then
+            info "KV bucket provisioning complete"
+        else
+            error "KV bucket provisioning failed"
+            exit 1
+        fi
     else
-        info "Skipping stream provisioning — requires nats CLI and jq"
+        info "Skipping stream and KV provisioning — requires nats CLI and jq"
         if ! command -v nats >/dev/null 2>&1; then
             info "  nats CLI not installed. See: https://github.com/nats-io/natscli"
         fi

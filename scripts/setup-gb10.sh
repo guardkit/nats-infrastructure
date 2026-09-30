@@ -12,7 +12,8 @@
 #   4. Build and start services via Docker Compose
 #   5. Wait for NATS to be healthy
 #   6. Provision JetStream streams
-#   7. Provision KV buckets
+#   7. Provision KV buckets (the KV script is the only one that creates or
+#      corrects KV buckets; the stream script no longer touches them)
 #   8. Verify the NATS server (including KV bucket listing)
 #
 # Usage:

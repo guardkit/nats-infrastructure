@@ -4,8 +4,8 @@ This document describes the JetStream KV buckets used by the Jarvis Ship's Compu
 fleet, including configuration details, CLI usage, and agent interaction patterns.
 
 All KV buckets belong to the **APPMILLA** account (fleet-wide infrastructure) and are
-provisioned by `streams/provision-streams.sh` from the definitions in
-`streams/stream-definitions.json`.
+provisioned by `kv/provision-kv.sh` from the definitions in
+`kv/kv-definitions.json`.
 
 ---
 
@@ -387,18 +387,22 @@ is intentional — session context is ephemeral and can be rebuilt from conversa
 
 ## Provisioning
 
-KV buckets are defined in `streams/stream-definitions.json` under the `kv_buckets` array
-and provisioned by `streams/provision-streams.sh`.
+KV buckets are defined in `kv/kv-definitions.json` and provisioned by
+`kv/provision-kv.sh` — the only script that creates or changes KV buckets
+(`streams/provision-streams.sh` handles streams only).
 
 ```bash
-# Provision all streams and KV buckets (idempotent)
-./streams/provision-streams.sh
+# Create missing buckets and correct drifted settings (idempotent)
+./kv/provision-kv.sh
 
 # Preview changes without applying
-./streams/provision-streams.sh --dry-run
+./kv/provision-kv.sh --dry-run
+
+# Allow a bucket to be deleted and recreated when its storage type must change
+./kv/provision-kv.sh --recreate jarvis-session
 
 # Use a custom NATS URL
-NATS_URL=nats://nats:4222 ./streams/provision-streams.sh
+NATS_URL=nats://nats:4222 ./kv/provision-kv.sh
 ```
 
 See [README.md](../README.md) for full provisioning documentation.

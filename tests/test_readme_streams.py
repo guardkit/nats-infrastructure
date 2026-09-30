@@ -43,14 +43,6 @@ def stream_definitions() -> list[dict]:
     return data["streams"]
 
 
-@pytest.fixture
-def kv_bucket_definitions() -> list[dict]:
-    """Load KV bucket definitions from the JSON file."""
-    assert STREAM_DEFS_FILE.exists(), f"Stream definitions not found at {STREAM_DEFS_FILE}"
-    data = json.loads(STREAM_DEFS_FILE.read_text(encoding="utf-8"))
-    return data.get("kv_buckets", [])
-
-
 # --- AC-001: README.md has a "JetStream Streams" section ---
 
 

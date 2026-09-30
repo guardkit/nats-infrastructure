@@ -695,23 +695,22 @@ class TestProvisionKvDryRun:
                 f"--dry-run output should mention bucket '{bucket}', got:\n{stdout}"
             )
 
-    def test_dry_run_shows_dry_run_prefix(self) -> None:
-        """--dry-run output should use [DRY-RUN] prefix."""
+    def test_dry_run_reports_buckets_as_current(self) -> None:
+        """After provisioning, --dry-run reads the live buckets and finds nothing to change."""
         result = self._run_dry_run()
         assert result.returncode == 0
-        assert "[DRY-RUN]" in result.stdout, (
-            f"Output should use [DRY-RUN] prefix, got:\n{result.stdout}"
-        )
+        for bucket in EXPECTED_BUCKETS:
+            assert f"[OK] KV {bucket}" in result.stdout, (
+                f"Expected {bucket} to match its definition, got:\n{result.stdout}"
+            )
 
-    def test_dry_run_does_not_connect_to_nats(self) -> None:
-        """--dry-run should succeed without a running NATS server.
-
-        This proves dry-run skips the health check and does not modify buckets.
-        """
-        result = self._run_dry_run(nats_url="nats://nonexistent-host:4222")
-        assert result.returncode == 0, (
-            f"--dry-run should succeed even with unreachable NATS, stderr: {result.stderr}"
-        )
+    def test_dry_run_does_not_modify_buckets(self) -> None:
+        """--dry-run reads the server (to plan changes) but never changes it."""
+        before = nats_cmd("kv", "ls", "--names")
+        result = self._run_dry_run()
+        after = nats_cmd("kv", "ls", "--names")
+        assert result.returncode == 0, result.stderr
+        assert before.stdout == after.stdout
 
     def test_dry_run_shows_processing_count(self) -> None:
         """--dry-run should show how many bucket definitions are being processed."""
@@ -725,7 +724,7 @@ class TestProvisionKvDryRun:
         """--dry-run should show summary at the end."""
         result = self._run_dry_run()
         assert result.returncode == 0
-        assert "KV Buckets:" in result.stdout, (
+        assert "KV Buckets (planned):" in result.stdout, (
             f"--dry-run should show KV Buckets summary, got:\n{result.stdout}"
         )
 
