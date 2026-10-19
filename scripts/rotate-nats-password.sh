@@ -206,6 +206,12 @@ usage() { awk 'NR >= 2 { if ($0 !~ /^#/) exit; sub(/^# ?/, ""); print }' "${BASH
 # the per-consumer pages' §10 before an attended rotation.
 # Broker-only members (ADMIN / JAMES / MARK) have NO rows: PAGE-nats §8 carries
 # their open DISCOVERY cells — never replace a DISCOVERY with a guess.
+# DASHBOARD_APPROVE has NO row either, for a different reason: its one consumer
+# copy is not a sops file. The factory dashboard reads the password from a FILE
+# in its own config folder (beside its accounts.yaml and session_secret), whose
+# path a dashboard setting names. That copy is written FROM the broker authority
+# under `sops exec-env` by a shell builtin, so the value never reaches argv or a
+# terminal; FILE_COPY_NOTE (per-account map below) carries that runbook step.
 # ---------------------------------------------------------------------------
 CONSUMERS="\
 RICH|gb10|nats/specialist-agent.enc.env|plain:NATS_PASSWORD|req|specialist pair (PAGE-nats 3.5 rows 1-2): recreate BOTH roles via sops exec-env … 'docker compose -f <abs>/specialist-agent/docker-compose.dual-role.yml up -d --force-recreate'
@@ -217,8 +223,7 @@ JARVIS|gb10|slack-jarvis/jarvis.enc.env|plain:JARVIS_NATS_PASSWORD|req|jarvis da
 FLEET_MEMORY|gb10|fleet-memory-pg/relay-env-deploy.enc.env|url:FLEET_MEMORY_NATS_URL|req|fleet-memory-relay (PAGE-nats 3.3 row 1 / PAGE-fleet-memory-pg 10.3): sops exec-env … 'docker compose up -d --force-recreate' from deploy/relay — the Created timestamp MUST change
 FLEET_MEMORY|gb10|fleet-memory-pg/fleet-memory-root.enc.env|url:FLEET_MEMORY_NATS_URL|req|fleet-memory root reader (PAGE-nats 3.3 row 2) — TWICE-STALE copy (PAGE-fleet-memory-pg 9): R4 on this file is mandatory, picked up at next process start
 FLEET_MEMORY|gb10|fleet-memory-pg/guardkit.enc.env|url:FLEET_MEMORY_NATS_URL|req|guardkit reader copy (PAGE-nats 3.3 row 3) — next guardkit process start
-GUARDKIT|gb10|fleet-memory-pg/guardkit.enc.env|plain:GUARDKIT_NATS_PASSWORD|opt|PAGE-nats 3.4 + 8 DISCOVERY: no on-disk consumer copy was found in the 07-11 sweep — if the key is absent this is a SKIP, and the invoking env of the harvest publisher is still the open cell
-DASHBOARD_APPROVE|gb10|factory-dashboard/dashboard-approve.enc.env|plain:DASHBOARD_APPROVE_NATS_PASSWORD|opt|factory dashboard answers module (approvals design 2026-10-19). DELIVERY: the dashboard reads this password from a FILE whose path its own setting names; it is never on argv, in a container environment or in any printed line. Its compose takes the value from a sops exec-env child process as a compose secret, so the container sees /run/secrets/dashboard_approve_nats_password. Recreate the dashboard under sops exec-env with --force-recreate AFTER the broker recreate. 'opt' until the dashboard's own enc file exists — VERIFY the file and host at run time"
+GUARDKIT|gb10|fleet-memory-pg/guardkit.enc.env|plain:GUARDKIT_NATS_PASSWORD|opt|PAGE-nats 3.4 + 8 DISCOVERY: no on-disk consumer copy was found in the 07-11 sweep — if the key is absent this is a SKIP, and the invoking env of the harvest publisher is still the open cell"
 
 # ---------------------------------------------------------------------------
 # Parse arguments (no secret ever arrives on argv)
@@ -339,6 +344,10 @@ fi
 # ---------------------------------------------------------------------------
 PROBE_CAPTURE=""
 PROBE_CAPTURE_DETAIL=""
+# Non-empty only for an account whose consumer copy is a plain FILE rather than
+# a sops consumer file (see CONSUMERS): printed by emit_consumer_runbook as the
+# step that refreshes that copy. Names the variable, never a value.
+FILE_COPY_NOTE=""
 case "${ACCOUNT}" in
     # admin's user carries NO permissions block (accounts.conf.template:228-232)
     # and lives in SYS, which has no `jetstream:` line at all
@@ -409,7 +418,14 @@ this user has NO permitted subject outside a stream filter, so the probe cannot 
 Forge's merge executor holds a CORE subscription on agents.approval.forge.*.response
 and receives the probe: the payload is not a MessageEnvelope, so it logs one
 'Failed to parse NATS message as MessageEnvelope' error per probe and does nothing
-else. Expect that error; do not chase it. AGENTS keeps 24h (stream-definitions.json:18)." ;;
+else. Expect that error; do not chase it. AGENTS keeps 24h (stream-definitions.json:18)."
+                   FILE_COPY_NOTE="the factory dashboard's copy is a FILE in its config folder, named by its own setting
+(convention: \${FACTORY_DASH_CONFIG_DIR:-\$HOME/.config/factory-dashboard}/dashboard_approve_nats_password,
+mode 0600, owned by the dashboard's FACTORY_UID; the board sees it read-only under /config).
+Refresh it AFTER the broker recreate, from the authority, with nothing printed and nothing on argv:
+  cd ${SECRETS_ROOT} && ${SOPS_BIN} exec-env ${ENC_FILE} 'umask 077; d=\"\${FACTORY_DASH_CONFIG_DIR:-\$HOME/.config/factory-dashboard}\"; printf %s \"\$DASHBOARD_APPROVE_NATS_PASSWORD\" > \"\$d/dashboard_approve_nats_password.new\" && mv \"\$d/dashboard_approve_nats_password.new\" \"\$d/dashboard_approve_nats_password\"'
+then restart the dashboard's board container (docker compose restart board, in the dashboard checkout)
+unless the dashboard re-reads the file at each send." ;;
     *) die "--account must be one of ADMIN RICH JAMES MARK FORGE FLEET_MEMORY GUARDKIT JARVIS DASHBOARD_APPROVE" ;;
 esac
 VAR_NAME="${ACCOUNT}_NATS_PASSWORD"
@@ -885,10 +901,17 @@ apply_consumers() {
 }
 
 emit_consumer_runbook() {
-    local row host rel spec need note
+    local row host rel spec need note line
     echo ""
     echo "--- R4 CONSUMER MAP for ${ACCOUNT} (PAGE-nats §3; verify the estate before acting) ---"
     row="$(consumer_rows || true)"
+    if [ -z "${row}" ] && [ -n "${FILE_COPY_NOTE}" ]; then
+        echo "  (no sops consumer file for ${ACCOUNT}) — its one copy is a plain FILE:"
+        while IFS= read -r line; do
+            echo "    ${line}"
+        done < <(printf '%s\n' "${FILE_COPY_NOTE}")
+        return 0
+    fi
     if [ -z "${row}" ]; then
         echo "  (no consumer rows mapped — broker-side only; PAGE-nats §8 holds the open DISCOVERY cell)"
         return 0
