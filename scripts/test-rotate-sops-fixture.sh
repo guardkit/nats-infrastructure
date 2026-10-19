@@ -1102,7 +1102,7 @@ for acct in ADMIN RICH JAMES MARK FORGE FLEET_MEMORY GUARDKIT JARVIS DASHBOARD_A
     mapfile -t GRANTS < <(user_publish_grants "${puser}")
     permitted=""
     if [ "${#GRANTS[@]}" -eq 0 ]; then
-        # accounts.conf.template:227-234 — admin's user carries NO permissions
+        # accounts.conf.template:231-238 — admin's user carries NO permissions
         # block at all, so NATS grants it every subject. That is the ONE
         # allow-all exception; any OTHER user parsing empty is a parse hole or a
         # user that may not publish at all, and must NOT be waved through.

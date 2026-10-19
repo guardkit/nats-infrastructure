@@ -349,9 +349,9 @@ PROBE_CAPTURE_DETAIL=""
 # step that refreshes that copy. Names the variable, never a value.
 FILE_COPY_NOTE=""
 case "${ACCOUNT}" in
-    # admin's user carries NO permissions block (accounts.conf.template:228-232)
+    # admin's user carries NO permissions block (accounts.conf.template:232-236)
     # and lives in SYS, which has no `jetstream:` line at all
-    # (accounts.conf.template:227-234) — no stream can exist in that account, and
+    # (accounts.conf.template:231-238) — no stream can exist in that account, and
     # no filter above matches admin.> in any case. UNCAPTURED, kept.
     ADMIN)         PROBE_USER="admin";        PROBE_SUBJECT="admin.sec.probe";          RF_STREAM="";         RF_DURABLE="" ;;
     # rich publishes ">" (accounts.conf.template:40) — free choice. `probe.rich`
@@ -359,13 +359,13 @@ case "${ACCOUNT}" in
     RICH)          PROBE_USER="rich";         PROBE_SUBJECT="probe.rich";               RF_STREAM="";         RF_DURABLE="" ;;
     # james publishes ">" (accounts.conf.template:48). Same reasoning as rich.
     JAMES)         PROBE_USER="james";        PROBE_SUBJECT="probe.james";              RF_STREAM="";         RF_DURABLE="" ;;
-    # mark's ONLY publish grant is finproxy.> (accounts.conf.template:215) and
+    # mark's ONLY publish grant is finproxy.> (accounts.conf.template:219) and
     # the FINPROXY stream filters exactly finproxy.> (stream-definitions.json:83)
     # — there is NO permitted subject outside a stream filter, so the subject
     # stays and the attribution note carries the cost instead.
     MARK)          PROBE_USER="mark";         PROBE_SUBJECT="finproxy.sec.probe";       RF_STREAM="";         RF_DURABLE=""
                    PROBE_CAPTURE="FINPROXY"
-                   PROBE_CAPTURE_DETAIL="mark may publish ONLY finproxy.> (accounts.conf.template:215), and the FINPROXY
+                   PROBE_CAPTURE_DETAIL="mark may publish ONLY finproxy.> (accounts.conf.template:219), and the FINPROXY
 stream filters exactly finproxy.> (stream-definitions.json:83) — this user has NO
 permitted subject outside a stream filter, so the probe cannot be moved.
 FINPROXY is work-retention (stream-definitions.json:84) with no consumer, so the
@@ -406,24 +406,28 @@ MEMORY keeps 365d (stream-definitions.json:73), so the message persists." ;;
     # _INBOX.> (accounts.conf.template:165) — permitted and uncaptured.
     JARVIS)        PROBE_USER="jarvis";       PROBE_SUBJECT="_INBOX.sec.probe";         RF_STREAM="";         RF_DURABLE="" ;;
     # dashboard_approve's ONLY publish grant is agents.approval.forge.*.response
-    # (accounts.conf.template:196 — a publisher of card answers and nothing else),
+    # (accounts.conf.template:200 — a publisher of card answers and nothing else),
     # which AGENTS filters (stream-definitions.json:16). There is no permitted
     # uncaptured subject: the subject stays and the attribution note carries the
     # cost. The token 'sec-rotate-probe' is never a card's request token.
     DASHBOARD_APPROVE) PROBE_USER="dashboard_approve"; PROBE_SUBJECT="agents.approval.forge.sec-rotate-probe.response"; RF_STREAM=""; RF_DURABLE=""
                    PROBE_CAPTURE="AGENTS"
                    PROBE_CAPTURE_DETAIL="dashboard_approve may publish ONLY agents.approval.forge.*.response
-(accounts.conf.template:196), which AGENTS filters (stream-definitions.json:16) —
+(accounts.conf.template:200), which AGENTS filters (stream-definitions.json:16) —
 this user has NO permitted subject outside a stream filter, so the probe cannot be moved.
 Forge's merge executor holds a CORE subscription on agents.approval.forge.*.response
-and receives the probe: the payload is not a MessageEnvelope, so it logs one
-'Failed to parse NATS message as MessageEnvelope' error per probe and does nothing
-else. Expect that error; do not chase it. AGENTS keeps 24h (stream-definitions.json:18)."
+and receives each accepted probe. The payload is plain text, not a MessageEnvelope,
+so Forge logs a WARNING and drops it before any handler runs (no card, no metric):
+  envelope subscribe: dropping malformed envelope on agents.approval.forge.*.response (...)
+Expect it TWICE per rotation: the publish that confirms the recreate came back and
+the R2 publish each land one. Do not chase it. AGENTS keeps 24h (stream-definitions.json:18)."
                    FILE_COPY_NOTE="the factory dashboard's copy is a FILE in its config folder, named by its own setting
 (convention: \${FACTORY_DASH_CONFIG_DIR:-\$HOME/.config/factory-dashboard}/dashboard_approve_nats_password,
-mode 0600, owned by the dashboard's FACTORY_UID; the board sees it read-only under /config).
+mode 0600 — mktemp creates the temp file 0600 whatever is already there, and mv -f
+renames it over the old copy — owned by the dashboard's FACTORY_UID; the board sees
+it read-only under /config).
 Refresh it AFTER the broker recreate, from the authority, with nothing printed and nothing on argv:
-  cd ${SECRETS_ROOT} && ${SOPS_BIN} exec-env ${ENC_FILE} 'umask 077; d=\"\${FACTORY_DASH_CONFIG_DIR:-\$HOME/.config/factory-dashboard}\"; printf %s \"\$DASHBOARD_APPROVE_NATS_PASSWORD\" > \"\$d/dashboard_approve_nats_password.new\" && mv \"\$d/dashboard_approve_nats_password.new\" \"\$d/dashboard_approve_nats_password\"'
+  cd ${SECRETS_ROOT} && ${SOPS_BIN} exec-env ${ENC_FILE} 'umask 077; d=\"\${FACTORY_DASH_CONFIG_DIR:-\$HOME/.config/factory-dashboard}\"; t=\$(mktemp \"\$d/.dashboard_approve_nats_password.XXXXXX\") && printf %s \"\$DASHBOARD_APPROVE_NATS_PASSWORD\" > \"\$t\" && mv -f \"\$t\" \"\$d/dashboard_approve_nats_password\"'
 then restart the dashboard's board container (docker compose restart board, in the dashboard checkout)
 unless the dashboard re-reads the file at each send." ;;
     *) die "--account must be one of ADMIN RICH JAMES MARK FORGE FLEET_MEMORY GUARDKIT JARVIS DASHBOARD_APPROVE" ;;

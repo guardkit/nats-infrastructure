@@ -34,7 +34,7 @@ See [`.env.example`](.env.example) for all required environment variables and th
 - **Account auth** — APPMILLA (Rich + James, full access), FINPROXY (Mark, scoped), SYS (admin).
   APPMILLA also holds subject-scoped service users: `forge`, `fleet-memory`, `guardkit`, `jarvis` and
   `dashboard_approve` (the factory dashboard's answers to Forge's cards: it may publish only on
-  `agents.approval.forge.*.response` and subscribe only to `_INBOX.>`). Nine passwords in all; see
+  `agents.approval.forge.*.response` and may subscribe to nothing). Nine passwords in all; see
   `config/accounts/accounts.conf.template` and `.env.example`
 - **Ops scripts** — verification, health checks
 - **JetStream streams** — 6 core + project streams with idempotent provisioning
@@ -219,6 +219,20 @@ A `.dockerignore` excludes `.git`, `docs/`, `tasks/`, `.claude/`, `.guardkit/`,
    nine named `*_NATS_PASSWORD` variables; a missing one leaves an empty password or an unresolved
    `${VAR}`, and the entrypoint refuses to start
 4. NATS server starts with the processed configuration
+
+### Upgrading when an account password is added (release order)
+
+The template is read from the checkout (compose mounts `./config/accounts`), but the entrypoint, with its fixed list
+of password names, is built into the image. An old image with a new template leaves the new `${NAME}` unsubstituted,
+and the broker refuses to start: not at once, but at its next restart or reboot. So, for example for
+`DASHBOARD_APPROVE_NATS_PASSWORD` (19 October 2026):
+
+1. **Add the new key to the broker's encrypted env file first.** An extra variable is harmless to the old image.
+2. **Then pull, rebuild the image and recreate the broker, as one step**, under `sops exec-env`
+   (`docker compose up -d --build --force-recreate nats`), in an idle window.
+3. **Never `git pull` on its own** in the checkout the live broker runs from.
+
+If step 1 was missed, the broker refuses to start and names the missing variable.
 
 ## Health Check Verification
 

@@ -149,6 +149,14 @@ if [ "$processed_any" -eq 1 ]; then
         if grep -qE 'password[[:space:]]*:[[:space:]]*""' "$processed"; then
             echo "ERROR: Empty password value in processed config: ${processed}" >&2
             echo "Likely cause: envsubst substituted a missing env var with an empty string." >&2
+            # Name the cause: every password variable the templates use that
+            # is empty here. Names only — a value is never printed.
+            for name in $(cat "${TEMPLATE_DIR}"/*.conf.template | grep -oE '\$\{[A-Z_][A-Z0-9_]*_PASSWORD\}' | tr -d '${}' | sort -u); do
+                eval "val=\${${name}:-}"
+                if [ -z "$val" ]; then
+                    echo "${name} is missing from the broker's environment — in production, from the broker's encrypted env file (add the key there, then recreate the broker)." >&2
+                fi
+            done
             exit 1
         fi
     done

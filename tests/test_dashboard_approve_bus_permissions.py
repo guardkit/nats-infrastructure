@@ -18,7 +18,9 @@ What this proves, with a REAL nats-server and the PRODUCTION render path:
      * it is refused on ``agents.approval.forge.merge-FEAT-X`` (no ``.response``),
        ``pipeline.build-queued.x`` and ``jarvis.x`` — refused by the server, and
        nothing reaches a subscriber;
-     * it cannot subscribe to ``agents.>``; it can subscribe to its own ``_INBOX.>``;
+     * it can subscribe to NOTHING: ``agents.>``, ``_INBOX.>``, ``_INBOX.x`` and ``>`` are
+       all refused, and another client's reply on ``_INBOX.x`` never reaches it
+       (``_INBOX.>`` would be every client's replies — the 19 October review);
      * a wrong password is refused, so the auth path really checks passwords.
 3. The entrypoint refuses to start, and never reaches the server, when
    ``DASHBOARD_APPROVE_NATS_PASSWORD`` is missing.
@@ -380,16 +382,26 @@ def test_it_is_refused_anywhere_else(dashboard: Conn, watcher: Conn, subject: st
     )
 
 
-def test_it_cannot_subscribe_to_agents(dashboard: Conn) -> None:
-    said = dashboard.subscribe("agents.>", 2)
+@pytest.mark.parametrize("subject", ("agents.>", "_INBOX.>", "_INBOX.x", ">"))
+def test_it_cannot_subscribe_to_anything(dashboard: Conn, subject: str) -> None:
+    said = dashboard.subscribe(subject, 2)
     refusals = [line for line in _errors(said) if "Permissions Violation for Subscription" in line]
-    assert refusals and "agents.>" in refusals[0], (
-        "dashboard_approve was allowed to subscribe to agents.>"
+    assert refusals and subject in refusals[0], (
+        f"dashboard_approve was allowed to subscribe to {subject}"
     )
 
 
-def test_it_may_subscribe_to_its_own_inbox(dashboard: Conn) -> None:
-    assert _errors(dashboard.subscribe("_INBOX.dashboard-test.*", 3)) == []
+def test_another_clients_reply_never_reaches_it(dashboard: Conn, watcher: Conn) -> None:
+    """The over-grant the review found: with ``_INBOX.>`` this user read other
+    clients' private replies. Now the subscription is refused and nothing arrives."""
+    said = dashboard.subscribe("_INBOX.>", 4)
+    assert any("Permissions Violation for Subscription" in line for line in _errors(said))
+    assert _errors(watcher.publish("_INBOX.x", "someone-elses-reply")) == []
+    time.sleep(0.3)
+    got = dashboard.roundtrip("")
+    assert not any(line.startswith("MSG ") for line in got), (
+        "another client's reply reached dashboard_approve"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -407,3 +419,9 @@ def test_the_entrypoint_refuses_to_start_without_the_new_password(tmp_path: Path
     )
     assert not box["marker"].exists(), "the entrypoint reached nats-server anyway"
     assert "Empty password value" in result.stderr, result.stderr[-1000:]
+    assert (
+        "DASHBOARD_APPROVE_NATS_PASSWORD is missing from the broker's environment"
+        in result.stderr
+    ), result.stderr[-1000:]
+    named = [line for line in result.stderr.splitlines() if " is missing from the broker" in line]
+    assert len(named) == 1, "the refusal named more than the one missing password"

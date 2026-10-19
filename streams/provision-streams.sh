@@ -111,10 +111,9 @@ needs_update() {
     info=$(nats stream info "$name" "${NATS_OPTS[@]}" --json 2>/dev/null) || return 0
 
     # Extract current values and compare with desired
-    local cur_retention cur_max_age cur_max_msgs cur_storage cur_replicas
-    cur_retention=$(echo "$info" | jq -r '.config.retention // empty' 2>/dev/null || echo "")
+    # (retention, max_age and storage are not compared — see the note below.)
+    local cur_max_msgs cur_replicas
     cur_max_msgs=$(echo "$info" | jq -r '.config.max_msgs // empty' 2>/dev/null || echo "")
-    cur_storage=$(echo "$info" | jq -r '.config.storage // empty' 2>/dev/null || echo "")
     cur_replicas=$(echo "$info" | jq -r '.config.num_replicas // empty' 2>/dev/null || echo "")
 
     # Any mismatch means update is needed
