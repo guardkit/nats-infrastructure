@@ -73,6 +73,10 @@ REFUSED_PUBLISH_SUBJECTS = (
     "agents.approval.forge.merge-FEAT-X",
     "pipeline.build-queued.x",
     "jarvis.x",
+    # Two tokens between forge and response: refused by the exact
+    # `agents.approval.forge.*.response`, so a grant widened to `*.*` (or `>`)
+    # in that position is caught.
+    "agents.approval.forge.a.b.response",
 )
 
 NATS_SERVER = shutil.which("nats-server")
@@ -414,6 +418,10 @@ def test_the_entrypoint_refuses_to_start_without_the_new_password(tmp_path: Path
     generated = _generated_passwords()
     del generated["DASHBOARD_APPROVE"]
     result = _run_entrypoint(box, generated)
+    # First, before any assertion below prints the output: no value leaks.
+    said = result.stdout + result.stderr
+    leaked = [name for name, value in generated.items() if value in said]
+    assert leaked == [], f"the refusal printed the password value of: {leaked}"
     assert result.returncode != 0, (
         "the entrypoint started with DASHBOARD_APPROVE_NATS_PASSWORD missing"
     )

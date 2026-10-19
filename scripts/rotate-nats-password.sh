@@ -442,7 +442,7 @@ emit_probe_attribution() {
     local indent="${1:-}" line
     [ -n "${PROBE_CAPTURE}" ] || return 0
     echo "${indent}!! PROBE ATTRIBUTION: '${PROBE_SUBJECT}' IS captured by the ${PROBE_CAPTURE} JetStream stream."
-    echo "${indent}   Each ${ACCOUNT} auth probe (R2a/R2/R3) therefore lands ONE benign message in ${PROBE_CAPTURE}."
+    echo "${indent}   Each ACCEPTED ${ACCOUNT} probe lands ONE benign message in ${PROBE_CAPTURE}: TWO per rotation (the recreate check + R2; R2a/R3 are refused at login)."
     while IFS= read -r line; do
         [ -n "${line}" ] || continue
         echo "${indent}   ${line}"
