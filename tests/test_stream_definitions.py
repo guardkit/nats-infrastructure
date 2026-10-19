@@ -8,9 +8,10 @@ Verifies all acceptance criteria for TASK-JSTR-001:
 - AC-005: JSON is valid (parseable)
 - AC-006: Retention values use NATS CLI format: work (WorkQueue) or limits (Limits)
 
-Also verifies TASK-JSTR-003 KV bucket definitions:
-- AC-001: All 4 KV buckets defined in stream-definitions.json
-- AC-003: TTL values applied correctly (null = no TTL, persistent)
+KV buckets are NOT defined here: kv/kv-definitions.json is their only source
+of truth (see tests/test_kv_definitions.py). The TASK-JSTR-003 kv_buckets list
+that used to live in this file was removed because provision-streams.sh created
+buckets from it with default settings, drifting from the KV definitions.
 """
 
 from __future__ import annotations
@@ -39,30 +40,6 @@ REQUIRED_FIELDS = {
 # Valid retention values in NATS CLI format
 VALID_RETENTION_VALUES = {"work", "limits"}
 
-# Required fields for each KV bucket definition
-KV_REQUIRED_FIELDS = {"name", "ttl", "description"}
-
-# Expected KV buckets from the system spec (Feature 6)
-EXPECTED_KV_BUCKETS = {
-    "agent-status": {
-        "ttl": None,
-        "description_contains": "status",
-    },
-    "agent-registry": {
-        "ttl": None,
-        "description_contains": "routing",
-    },
-    "pipeline-state": {
-        "ttl": "7d",
-        "description_contains": "pipeline",
-    },
-    "jarvis-session": {
-        "ttl": "1h",
-        "description_contains": "session",
-    },
-}
-
-# Valid NATS duration pattern for TTL values
 NATS_DURATION_PATTERN = re.compile(r"^\d+[smhd]$")
 
 # Expected core streams from the system spec (Feature 3)
@@ -575,198 +552,15 @@ class TestStreamCount:
 
 
 # =============================================================================
-# TASK-JSTR-003: KV Bucket Definitions
+# KV buckets are not defined here
 # =============================================================================
 
 
-@pytest.fixture
-def kv_buckets_list(stream_defs: dict) -> list[dict]:
-    """Extract the kv_buckets array from the definitions."""
-    assert "kv_buckets" in stream_defs, (
-        "stream-definitions.json must have a 'kv_buckets' key"
-    )
-    kv_buckets = stream_defs["kv_buckets"]
-    assert isinstance(kv_buckets, list), "'kv_buckets' must be a JSON array"
-    return kv_buckets
+class TestNoKvBucketsInStreamDefinitions:
+    """KV buckets come only from kv/kv-definitions.json (via kv/provision-kv.sh)."""
 
-
-@pytest.fixture
-def kv_buckets_by_name(kv_buckets_list: list[dict]) -> dict[str, dict]:
-    """Index KV buckets by name for easy lookup."""
-    return {b["name"]: b for b in kv_buckets_list}
-
-
-# --- TASK-JSTR-003 AC-001: All 4 KV buckets defined ---
-
-
-class TestKvBucketsExist:
-    """TASK-JSTR-003 AC-001: All 4 KV buckets defined in stream-definitions.json."""
-
-    def test_kv_buckets_key_exists(self, stream_defs: dict) -> None:
-        assert "kv_buckets" in stream_defs, (
-            "stream-definitions.json must have a top-level 'kv_buckets' key"
+    def test_no_kv_buckets_key(self, stream_defs: dict) -> None:
+        assert "kv_buckets" not in stream_defs, (
+            "stream-definitions.json must not define KV buckets — "
+            "add them to kv/kv-definitions.json instead"
         )
-
-    def test_kv_buckets_is_array(self, stream_defs: dict) -> None:
-        assert isinstance(stream_defs["kv_buckets"], list), (
-            "'kv_buckets' must be an array"
-        )
-
-    def test_exactly_4_kv_buckets(self, kv_buckets_list: list[dict]) -> None:
-        assert len(kv_buckets_list) == 4, (
-            f"Expected 4 KV buckets, got {len(kv_buckets_list)}"
-        )
-
-    def test_all_expected_buckets_present(
-        self, kv_buckets_by_name: dict[str, dict]
-    ) -> None:
-        for bucket_name in EXPECTED_KV_BUCKETS:
-            assert bucket_name in kv_buckets_by_name, (
-                f"KV bucket '{bucket_name}' not found in definitions"
-            )
-
-    def test_no_duplicate_bucket_names(self, kv_buckets_list: list[dict]) -> None:
-        names = [b["name"] for b in kv_buckets_list]
-        assert len(names) == len(set(names)), (
-            f"Duplicate KV bucket names found: {names}"
-        )
-
-
-# --- KV bucket required fields ---
-
-
-class TestKvBucketRequiredFields:
-    """All KV buckets must have required fields: name, ttl, description."""
-
-    def test_all_buckets_have_required_fields(
-        self, kv_buckets_list: list[dict]
-    ) -> None:
-        for bucket in kv_buckets_list:
-            bucket_name = bucket.get("name", "<unnamed>")
-            missing = KV_REQUIRED_FIELDS - set(bucket.keys())
-            assert not missing, (
-                f"KV bucket '{bucket_name}' is missing required fields: {missing}"
-            )
-
-    def test_name_is_string(self, kv_buckets_list: list[dict]) -> None:
-        for bucket in kv_buckets_list:
-            assert isinstance(bucket["name"], str), (
-                f"KV bucket name must be a string, got {type(bucket['name'])}"
-            )
-
-    def test_description_is_string(self, kv_buckets_list: list[dict]) -> None:
-        for bucket in kv_buckets_list:
-            name = bucket.get("name", "<unnamed>")
-            assert isinstance(bucket["description"], str), (
-                f"KV bucket '{name}': description must be a string"
-            )
-
-    def test_description_is_not_empty(self, kv_buckets_list: list[dict]) -> None:
-        for bucket in kv_buckets_list:
-            name = bucket.get("name", "<unnamed>")
-            assert len(bucket["description"].strip()) > 0, (
-                f"KV bucket '{name}': description must not be empty"
-            )
-
-
-# --- TASK-JSTR-003 AC-004: TTL values applied correctly ---
-
-
-class TestKvBucketTtlValues:
-    """TASK-JSTR-003 AC-004: TTL values applied correctly (null = no TTL, persistent)."""
-
-    def test_ttl_is_null_or_valid_duration(self, kv_buckets_list: list[dict]) -> None:
-        for bucket in kv_buckets_list:
-            name = bucket.get("name", "<unnamed>")
-            ttl = bucket.get("ttl")
-            if ttl is not None:
-                assert isinstance(ttl, str), (
-                    f"KV bucket '{name}': ttl must be null or a string, got {type(ttl)}"
-                )
-                assert NATS_DURATION_PATTERN.match(ttl), (
-                    f"KV bucket '{name}': ttl '{ttl}' does not match NATS duration format "
-                    f"(expected pattern like '7d', '1h')"
-                )
-
-    @pytest.mark.parametrize("bucket_name", list(EXPECTED_KV_BUCKETS.keys()))
-    def test_expected_ttl_values(
-        self, kv_buckets_by_name: dict[str, dict], bucket_name: str
-    ) -> None:
-        expected = EXPECTED_KV_BUCKETS[bucket_name]
-        actual = kv_buckets_by_name[bucket_name]
-        assert actual["ttl"] == expected["ttl"], (
-            f"KV bucket '{bucket_name}': ttl mismatch — "
-            f"expected {expected['ttl']!r}, got {actual['ttl']!r}"
-        )
-
-    def test_agent_status_is_persistent(
-        self, kv_buckets_by_name: dict[str, dict]
-    ) -> None:
-        assert kv_buckets_by_name["agent-status"]["ttl"] is None, (
-            "agent-status must have null TTL (persistent)"
-        )
-
-    def test_agent_registry_is_persistent(
-        self, kv_buckets_by_name: dict[str, dict]
-    ) -> None:
-        assert kv_buckets_by_name["agent-registry"]["ttl"] is None, (
-            "agent-registry must have null TTL (persistent)"
-        )
-
-    def test_pipeline_state_ttl_is_7d(
-        self, kv_buckets_by_name: dict[str, dict]
-    ) -> None:
-        assert kv_buckets_by_name["pipeline-state"]["ttl"] == "7d", (
-            f"pipeline-state TTL must be '7d', got '{kv_buckets_by_name['pipeline-state']['ttl']}'"
-        )
-
-    def test_jarvis_session_ttl_is_1h(
-        self, kv_buckets_by_name: dict[str, dict]
-    ) -> None:
-        assert kv_buckets_by_name["jarvis-session"]["ttl"] == "1h", (
-            f"jarvis-session TTL must be '1h', got '{kv_buckets_by_name['jarvis-session']['ttl']}'"
-        )
-
-
-# --- KV bucket naming convention ---
-
-
-class TestKvBucketNaming:
-    """KV bucket names must follow kebab-case convention."""
-
-    KEBAB_CASE_PATTERN = re.compile(r"^[a-z][a-z0-9]*(-[a-z][a-z0-9]*)*$")
-
-    def test_bucket_names_are_kebab_case(self, kv_buckets_list: list[dict]) -> None:
-        for bucket in kv_buckets_list:
-            name = bucket["name"]
-            assert self.KEBAB_CASE_PATTERN.match(name), (
-                f"KV bucket name '{name}' does not follow kebab-case convention"
-            )
-
-
-# --- Seam test: kv_buckets contract ---
-
-
-@pytest.mark.seam
-class TestKvBucketsContract:
-    """Seam test: verify kv_buckets section in stream-definitions.json."""
-
-    def test_top_level_kv_buckets_key_exists(self, stream_defs: dict) -> None:
-        assert "kv_buckets" in stream_defs, "Top-level 'kv_buckets' key must exist"
-
-    def test_at_least_4_kv_buckets(self, kv_buckets_list: list[dict]) -> None:
-        assert len(kv_buckets_list) >= 4, (
-            f"Expected at least 4 KV buckets, got {len(kv_buckets_list)}"
-        )
-
-    def test_all_buckets_have_required_fields(
-        self, kv_buckets_list: list[dict]
-    ) -> None:
-        for bucket in kv_buckets_list:
-            assert "name" in bucket, "KV bucket missing 'name' field"
-            assert "ttl" in bucket, (
-                f"KV bucket '{bucket.get('name', '?')}' missing 'ttl' field"
-            )
-            assert "description" in bucket, (
-                f"KV bucket '{bucket.get('name', '?')}' missing 'description' field"
-            )

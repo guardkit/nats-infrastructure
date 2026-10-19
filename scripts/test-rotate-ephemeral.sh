@@ -14,7 +14,7 @@
 #   - `trap ... EXIT` removes the container even on failure / early-stop.
 #   - The scratch template is read from the PINNED SHA via `git show`
 #     (read-only), never the working tree — Session A may have it mid-edit.
-#   - All eight scratch passwords are generated at runtime (openssl rand -hex,
+#   - All nine scratch passwords are generated at runtime (openssl rand -hex,
 #     alnum-safe), written only to a chmod-600 env-file under the work root,
 #     NEVER printed, NEVER committed, NEVER placed on any argv.
 #
@@ -147,10 +147,10 @@ trace: false
 include "accounts/accounts.conf"
 EOF
 
-# Generate all eight scratch passwords (alnum-safe hex). Values live ONLY in
+# Generate all nine scratch passwords (alnum-safe hex). Values live ONLY in
 # these shell vars + the chmod-600 env-file; never printed, committed, or argv'd.
 gen() { openssl rand -hex 16; }
-SCRATCH_ACCOUNTS="ADMIN RICH JAMES MARK FORGE FLEET_MEMORY GUARDKIT JARVIS"
+SCRATCH_ACCOUNTS="ADMIN RICH JAMES MARK FORGE FLEET_MEMORY GUARDKIT JARVIS DASHBOARD_APPROVE"
 umask 077
 : > "${SCRATCH_ENV}"
 declare -A SCRATCH_PW=()

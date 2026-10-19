@@ -166,11 +166,14 @@ class TestDryRunFlag:
             "Script must use [DRY-RUN] prefix to indicate planned actions"
         )
 
-    def test_dry_run_skips_nats_health_wait(self, script_text: str) -> None:
-        """Script must skip NATS health wait in dry-run mode."""
-        assert re.search(r"DRY_RUN.*true", script_text), (
-            "Script must check DRY_RUN to skip health wait"
-        )
+    def test_dry_run_reads_live_state(self, script_text: str) -> None:
+        """Dry run must read the live buckets so it can print the planned changes.
+
+        (It used to skip the server entirely and could only say "would
+        check/update"; behaviour is covered in test_provision_kv_reconcile.py.)
+        """
+        assert "Would check/update" not in script_text
+        assert re.search(r"Would update KV", script_text)
 
 
 # =============================================================================
@@ -181,11 +184,17 @@ class TestDryRunFlag:
 class TestIdempotency:
     """AC-004: Script checks if bucket exists before creating."""
 
-    def test_uses_nats_kv_info(self, script_text: str) -> None:
-        """Script must use 'nats kv info' to check bucket existence."""
-        assert re.search(r"nats\s+kv\s+info", script_text), (
-            "Script must use 'nats kv info' to check KV bucket existence"
-        )
+    def test_reads_bucket_settings_as_json(self, script_text: str) -> None:
+        """Live settings are read from the bucket's stream as JSON.
+
+        The installed nats CLI has no `nats kv info --json`, so the script
+        reads `nats stream info KV_<bucket> --json`.
+        """
+        assert re.search(r'nats stream info "KV_\$\{name\}" --json', script_text)
+
+    def test_lists_existing_buckets(self, script_text: str) -> None:
+        """Existence comes from one bucket listing, so a failed read is never mistaken for 'missing'."""
+        assert re.search(r"nats kv ls --names", script_text)
 
     def test_uses_nats_kv_add(self, script_text: str) -> None:
         """Script must use 'nats kv add' for creating KV buckets."""
@@ -193,10 +202,16 @@ class TestIdempotency:
             "Script must use 'nats kv add' to create KV buckets"
         )
 
-    def test_uses_nats_kv_update(self, script_text: str) -> None:
-        """Script must use 'nats kv update' for updating existing KV buckets."""
-        assert re.search(r"nats\s+kv\s+update", script_text), (
-            "Script must use 'nats kv update' to update existing KV buckets"
+    def test_uses_nats_kv_edit_not_update(self, script_text: str) -> None:
+        """Bucket settings are changed with 'nats kv edit'.
+
+        'nats kv update' updates a KEY's value, not bucket settings.
+        """
+        assert re.search(r"kv\s+edit", script_text), (
+            "Script must use 'nats kv edit' to correct existing KV buckets"
+        )
+        assert not re.search(r"kv\s+update", script_text), (
+            "Script must not use 'nats kv update' (it updates a key, not a bucket)"
         )
 
     def test_has_provision_kv_bucket_function(self, script_text: str) -> None:
@@ -206,13 +221,13 @@ class TestIdempotency:
         )
 
     def test_checks_existence_before_create(self, script_text: str) -> None:
-        """nats kv info must appear before nats kv add in the provision function."""
-        info_pos = script_text.find("nats kv info")
-        add_pos = script_text.find("nats kv add")
-        assert info_pos > 0, "Script must use 'nats kv info'"
-        assert add_pos > 0, "Script must use 'nats kv add'"
-        assert info_pos < add_pos, (
-            "'nats kv info' check must come before 'nats kv add' in provision function"
+        """The bucket listing must happen before any bucket is created."""
+        main_body = script_text[script_text.index("main() {"):]
+        ls_pos = main_body.find("list_buckets")
+        provision_pos = main_body.find("provision_kv_bucket")
+        assert ls_pos > 0, "main must list existing buckets"
+        assert provision_pos > ls_pos, (
+            "Existing buckets must be listed before provisioning each bucket"
         )
 
 
@@ -488,8 +503,8 @@ class TestKvFlagSupport:
 
     def test_ttl_is_conditional(self, script_text: str) -> None:
         """TTL flag must only be applied when TTL is non-empty."""
-        assert re.search(r"ttl_opts", script_text), (
-            "Script must conditionally apply TTL flags via ttl_opts array"
+        assert re.search(r'if \[\[ "\$ttl_s" -gt 0 \]\]; then\s+opts\+=\("--ttl"', script_text), (
+            "Script must only pass --ttl when the definition has a TTL"
         )
 
 

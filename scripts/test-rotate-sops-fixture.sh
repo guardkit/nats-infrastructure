@@ -68,7 +68,8 @@
 #        config/accounts/accounts.conf.template (an unpermitted subject is
 #        refused asynchronously by a core `nats pub`, so GATE R2 would pass
 #        vacuously) — AND (b) checked against the stream filters PARSED OUT of
-#        streams/stream-definitions.json: an uncaptured subject must carry NO
+#        streams/stream-definitions.json (plus each KV bucket's implicit
+#        $KV.<bucket>.> filter from kv/kv-definitions.json): an uncaptured subject must carry NO
 #        attribution note, a captured one MUST carry a loud one
 #
 # USAGE: test-rotate-sops-fixture.sh [--keep]
@@ -205,7 +206,7 @@ creation_rules:
 EOF
     umask 077
 
-    # Broker authority — all eight. FIDELITY: the REAL nats/broker.enc.env (and
+    # Broker authority — all nine. FIDELITY: the REAL nats/broker.enc.env (and
     # forge-nats / jarvis / specialist-agent) carry WHOLE-LINE `#` comments,
     # including ones containing `|` and `=`. The exec-env parser law bans INLINE
     # (trailing) comments on a value line — it does not ban comment lines — so
@@ -225,6 +226,8 @@ EOF
         printf 'GUARDKIT_NATS_PASSWORD=%s\n' "${OLD_GUARDKIT}"
         printf '# Account: JARVIS | User: jarvis | systemd --user consumer\n'
         printf 'JARVIS_NATS_PASSWORD=%s\n' "${OLD_JARVIS}"
+        printf '# Account: APPMILLA | User: dashboard_approve | factory dashboard answers (file)\n'
+        printf 'DASHBOARD_APPROVE_NATS_PASSWORD=%s\n' "$(gen)"
     } > "${root}/nats/broker.enc.env"
 
     # rich consumers (plain fields).
@@ -925,9 +928,11 @@ stream_filters() {
 # Every KV bucket is ALSO a stream (KV_<bucket>) whose subject filter is
 # $KV.<bucket>.> — declared by name, never by a "subjects" key, so the parse
 # above cannot see it. A probe on a $KV subject would not merely be persisted:
-# it is a KV API call. Derive those filters too, from the same file.
+# it is a KV API call. Derive those filters too, from kv/kv-definitions.json —
+# the ONLY source of KV buckets (stream-definitions.json no longer lists them).
+KV_DEFS="${SCRIPT_DIR}/../kv/kv-definitions.json"
 kv_filters() {
-    sed -n '/"kv_buckets"/,$p' "${STREAM_DEFS}" \
+    sed -n '/"kv_buckets"/,$p' "${KV_DEFS}" \
         | sed -n "s/.*\"name\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\$KV.\1.>/p"
 }
 # NATS subject matching: '*' = exactly one token · '>' = one-or-more trailing
@@ -950,12 +955,13 @@ subject_matches_filter() {  # $1 subject · $2 filter → 0 = CAPTURED
     return 1
 }
 [ -f "${STREAM_DEFS}" ] || { echo "stream definitions not found: ${STREAM_DEFS}" >&2; exit 2; }
+[ -f "${KV_DEFS}" ] || { echo "KV definitions not found: ${KV_DEFS}" >&2; exit 2; }
 mapfile -t FILTERS < <(stream_filters; kv_filters)
 # Gate-of-the-gate #1: a parse that silently yields nothing would pass every
 # account vacuously. 8 declared streams (one of which lists 2 subjects) + 4 KV
 # buckets = 13 filters; require the full set, not "some".
 if [ "${#FILTERS[@]}" -ge 13 ]; then
-    pass "(15) parsed ${#FILTERS[@]} stream + KV subject filters out of stream-definitions.json"
+    pass "(15) parsed ${#FILTERS[@]} stream + KV subject filters out of stream-definitions.json + kv-definitions.json"
 else
     fail "(15) only ${#FILTERS[@]} filters parsed — the capture check would be vacuous"
 fi
@@ -1069,7 +1075,7 @@ chk "${parser_bad}" "(15) the publish-grant parser is sound on all three grant s
 
 captured_accounts=""
 probe_bad=0
-for acct in ADMIN RICH JAMES MARK FORGE FLEET_MEMORY GUARDKIT JARVIS; do
+for acct in ADMIN RICH JAMES MARK FORGE FLEET_MEMORY GUARDKIT JARVIS DASHBOARD_APPROVE; do
     plog="${WORK}/dry-probe-${acct}.log"
     p_rc=0
     run_rotate "${plog}" "$(gen)" "$(gen)" --account "${acct}" || p_rc=$?
@@ -1096,7 +1102,7 @@ for acct in ADMIN RICH JAMES MARK FORGE FLEET_MEMORY GUARDKIT JARVIS; do
     mapfile -t GRANTS < <(user_publish_grants "${puser}")
     permitted=""
     if [ "${#GRANTS[@]}" -eq 0 ]; then
-        # accounts.conf.template:201-208 — admin's user carries NO permissions
+        # accounts.conf.template:231-238 — admin's user carries NO permissions
         # block at all, so NATS grants it every subject. That is the ONE
         # allow-all exception; any OTHER user parsing empty is a parse hole or a
         # user that may not publish at all, and must NOT be waved through.
@@ -1139,12 +1145,13 @@ for acct in ADMIN RICH JAMES MARK FORGE FLEET_MEMORY GUARDKIT JARVIS; do
 done
 chk "${probe_bad}" "(15) every account's probe subject obeys the PROBE-SUBJECT LAW" \
     "(15) ${probe_bad} probe-subject verdict(s) failed"
-# The ONLY accounts allowed to keep a captured subject are the two whose grants
-# contain no uncaptured subject at all: guardkit may publish only
-# memory.episode.>, mark only finproxy.>. A third name here means a curable
-# probe was left in a stream.
-same "${captured_accounts}" "MARK GUARDKIT " \
-    "(15) exactly MARK + GUARDKIT keep a captured subject (their grants allow nothing else)" \
+# The ONLY accounts allowed to keep a captured subject are the three whose
+# grants contain no uncaptured subject at all: guardkit may publish only
+# memory.episode.>, mark only finproxy.>, dashboard_approve only
+# agents.approval.forge.*.response (captured by AGENTS). A fourth name here
+# means a curable probe was left in a stream.
+same "${captured_accounts}" "MARK GUARDKIT DASHBOARD_APPROVE " \
+    "(15) exactly MARK + GUARDKIT + DASHBOARD_APPROVE keep a captured subject (their grants allow nothing else)" \
     "(15) the set of stream-captured probe accounts changed — a curable probe is landing in a stream"
 
 # ---------------------------------------------------------------------------

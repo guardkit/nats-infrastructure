@@ -31,15 +31,21 @@ See [`.env.example`](.env.example) for all required environment variables and th
 - **Docker Compose** — NATS server with JetStream, volume persistence, health checks
 - **Dockerfile** — Custom image extending `nats:2.11-alpine` with `envsubst` support
 - **Server config** — `nats-server.conf` with JetStream enabled, Tailscale-accessible
-- **Account auth** — APPMILLA (Rich + James, full access), FINPROXY (Mark, scoped), SYS (admin)
+- **Account auth** — APPMILLA (Rich + James, full access), FINPROXY (Mark, scoped), SYS (admin).
+  APPMILLA also holds subject-scoped service users: `forge`, `fleet-memory`, `guardkit`, `jarvis` and
+  `dashboard_approve` (the factory dashboard's answers to Forge's cards: it may publish only on
+  `agents.approval.forge.*.response` and may subscribe to nothing). Nine passwords in all; see
+  `config/accounts/accounts.conf.template` and `.env.example`
 - **Ops scripts** — verification, health checks
-- **JetStream streams** — 6 core + project streams and KV buckets with idempotent provisioning
+- **JetStream streams** — 6 core + project streams with idempotent provisioning
+- **KV buckets** — 4 buckets, created and kept in line with their definitions by `kv/provision-kv.sh`
 
 ## JetStream Streams
 
-All JetStream streams and KV buckets are defined declaratively in
+All JetStream streams are defined declaratively in
 [`streams/stream-definitions.json`](streams/stream-definitions.json) and provisioned
 by the idempotent [`streams/provision-streams.sh`](streams/provision-streams.sh) script.
+KV buckets are defined separately — see [KV Buckets](#kv-buckets).
 
 ### Core Streams
 
@@ -65,14 +71,16 @@ FINPROXY NATS account (Mark), enforced at the account permission level.
 ### KV Buckets
 
 JetStream KV buckets provide key-value storage backed by streams. They are defined in
-the `kv_buckets` array of `stream-definitions.json` and provisioned alongside streams.
+[`kv/kv-definitions.json`](kv/kv-definitions.json) — the only place KV bucket settings
+live — and provisioned by [`kv/provision-kv.sh`](kv/provision-kv.sh), which runs after
+the streams.
 
-| Bucket | TTL | Storage | History | Description |
-|--------|-----|---------|---------|-------------|
-| agent-status | — | file | 1 | Last known status per agent — replaces polling |
-| agent-registry | — | file | 5 | Fleet routing table — agent capability manifests, used by Jarvis for routing |
-| pipeline-state | 7d | file | 3 | Current pipeline state per feature_id |
-| jarvis-session | 1h | memory | 1 | Jarvis conversation session context |
+| Bucket | TTL | Storage | History | Max value | Description |
+|--------|-----|---------|---------|-----------|-------------|
+| agent-status | — | file | 1 | 64KB | Last known status per agent — replaces polling |
+| agent-registry | — | file | 5 | 256KB | Fleet routing table — agent capability manifests, used by Jarvis for routing |
+| pipeline-state | 7d | file | 3 | 64KB | Current pipeline state per feature_id |
+| jarvis-session | 1h | memory | 1 | 128KB | Jarvis conversation session context |
 
 Buckets with no TTL (`null`) are persistent — keys remain until explicitly deleted.
 Buckets with a TTL automatically expire keys after the specified duration. Memory-backed
@@ -81,14 +89,56 @@ buckets (`jarvis-session`) do not survive server restarts.
 For detailed KV usage patterns, CLI examples, watch patterns, and agent interaction
 documentation, see [`docs/kv-usage.md`](docs/kv-usage.md).
 
+#### Keeping KV buckets in line with their definitions
+
+`kv/provision-kv.sh` creates any missing bucket with its defined settings. For a bucket
+that already exists it reads the live settings and compares them with the definition:
+
+- history, max value size, TTL and replicas are corrected in place with `nats kv edit`,
+  and the bucket is read again to confirm the change took (TTL is compared to the
+  nanosecond, so a sub-second TTL on a bucket meant to be persistent counts as drift);
+- a different **storage type** (file vs memory) cannot be edited — the bucket has to be
+  deleted and recreated, which loses its values — so the script refuses by default and
+  says so. Pass `--recreate <bucket>` to allow exactly that bucket to be recreated.
+
+```bash
+# Show what would change, without changing anything (reads the live buckets)
+./kv/provision-kv.sh --dry-run
+
+# Apply: create missing buckets, correct drifted settings
+./kv/provision-kv.sh
+
+# Also allow jarvis-session to be deleted and recreated to change its storage type
+./kv/provision-kv.sh --recreate jarvis-session
+```
+
+If the live settings come back incomplete or invalid (a missing or unknown storage type,
+a missing or non-integer history, TTL or replica count), that bucket is reported as an
+error and left untouched — even when `--recreate` names it.
+
+The script exits non-zero if any bucket could not be read, created or corrected, or was
+refused; `--dry-run` exits the same way the real run would.
+
+> **Changed (September 2026):** `streams/provision-streams.sh` used to create the KV
+> buckets too, from its own list, with default settings (history 1, no size limit, file
+> storage). Because it ran first, those defaults won, and `kv/provision-kv.sh` then
+> tried to correct them with `nats kv update` — a command that updates a key, not a
+> bucket — failed, and still reported success. The live buckets drifted from their
+> definitions as a result. Now only `kv/provision-kv.sh` creates KV buckets, it uses
+> `nats kv edit`, and it fails loudly.
+
 ### Provisioning Commands
 
 ```bash
-# Provision all streams and KV buckets (idempotent — safe to run multiple times)
+# Provision all streams (idempotent — safe to run multiple times)
 ./streams/provision-streams.sh
+
+# Then provision KV buckets
+./kv/provision-kv.sh
 
 # Preview what would happen without making changes
 ./streams/provision-streams.sh --dry-run
+./kv/provision-kv.sh --dry-run
 
 # Use a custom NATS URL
 NATS_URL=nats://nats:4222 ./streams/provision-streams.sh
@@ -108,15 +158,16 @@ pattern applies to both streams and KV buckets:
 
 1. **Resource does not exist** → `[CREATE]` — creates the stream or KV bucket with the defined config
 2. **Resource exists and config matches** → `[OK]` — no changes made
-3. **Resource exists but config differs** → `[UPDATE]` — updates the stream via `nats stream update --force` or the KV bucket via `nats kv update`
+3. **Resource exists but config differs** → `[UPDATE]` — updates the stream via `nats stream update --force` or the KV bucket via `nats kv edit`
 4. **Resource operation fails** → `[ERROR]` — logged but does not halt remaining resources
 
-The script always exits 0 unless a fatal error occurs (missing `jq`, unreachable NATS
-server, missing definitions file). A summary is printed at the end:
+`provision-streams.sh` exits 0 unless a fatal error occurs (missing `jq`, unreachable
+NATS server, missing definitions file). `provision-kv.sh` additionally exits non-zero
+when any bucket has an `[ERROR]` or is `[REFUSED]`. Each prints a summary at the end:
 
 ```
 Streams:    X created, Y updated, Z already current, W errors
-KV Buckets: X created, Y updated, Z already current, W errors
+KV Buckets: X created, Y updated, R recreated, Z already current, W errors (N refused)
 ```
 
 ### Adding a New Stream
@@ -163,9 +214,25 @@ A `.dockerignore` excludes `.git`, `docs/`, `tasks/`, `.claude/`, `.guardkit/`,
 ### How Password Injection Works
 
 1. `.env` passwords are loaded into the container via `env_file: .env`
-2. `docker-entrypoint.sh` validates all 4 required password variables
-3. `envsubst` processes `config/accounts/accounts.conf.template` → live config
+2. `docker-entrypoint.sh` validates the 4 core password variables up front
+3. `envsubst` processes `config/accounts/accounts.conf.template` → live config, substituting only the
+   nine named `*_NATS_PASSWORD` variables; a missing one leaves an empty password or an unresolved
+   `${VAR}`, and the entrypoint refuses to start
 4. NATS server starts with the processed configuration
+
+### Upgrading when an account password is added (release order)
+
+The template is read from the checkout (compose mounts `./config/accounts`), but the entrypoint, with its fixed list
+of password names, is built into the image. An old image with a new template leaves the new `${NAME}` unsubstituted,
+and the broker refuses to start: not at once, but at its next restart or reboot. So, for example for
+`DASHBOARD_APPROVE_NATS_PASSWORD` (19 October 2026):
+
+1. **Add the new key to the broker's encrypted env file first.** An extra variable is harmless to the old image.
+2. **Then pull, rebuild the image and recreate the broker, as one step**, under `sops exec-env`
+   (`docker compose up -d --build --force-recreate nats`), in an idle window.
+3. **Never `git pull` on its own** in the checkout the live broker runs from.
+
+If step 1 was missed, the broker refuses to start and names the missing variable.
 
 ## Health Check Verification
 
