@@ -23,7 +23,7 @@ services:
     build: .
     container_name: ships-computer-nats
     restart: unless-stopped
-    # DF-022 sops cutover (Wave 3, 2026-07-30 — PAGE-nats §10.4): the 8 account
+    # DF-022 sops cutover (Wave 3, 2026-07-30 — PAGE-nats §10.4): the 9 account
     # passwords live sops-encrypted at ~/.config/fleet-secrets/nats/broker.enc.env
     # and are injected by `sops exec-env … 'docker compose up -d --force-recreate nats'`.
     # `environment:` interpolation (NOT env_file:) kills the false-green hazard class
@@ -40,6 +40,7 @@ services:
       FLEET_MEMORY_NATS_PASSWORD: ${FLEET_MEMORY_NATS_PASSWORD:?run via sops exec-env — see header}
       GUARDKIT_NATS_PASSWORD: ${GUARDKIT_NATS_PASSWORD:?run via sops exec-env — see header}
       JARVIS_NATS_PASSWORD: ${JARVIS_NATS_PASSWORD:?run via sops exec-env — see header}
+      DASHBOARD_APPROVE_NATS_PASSWORD: ${DASHBOARD_APPROVE_NATS_PASSWORD:?run via sops exec-env — see header}
 
     ports:
       - "4222:4222"   # Client connections

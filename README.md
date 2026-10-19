@@ -31,7 +31,11 @@ See [`.env.example`](.env.example) for all required environment variables and th
 - **Docker Compose** — NATS server with JetStream, volume persistence, health checks
 - **Dockerfile** — Custom image extending `nats:2.11-alpine` with `envsubst` support
 - **Server config** — `nats-server.conf` with JetStream enabled, Tailscale-accessible
-- **Account auth** — APPMILLA (Rich + James, full access), FINPROXY (Mark, scoped), SYS (admin)
+- **Account auth** — APPMILLA (Rich + James, full access), FINPROXY (Mark, scoped), SYS (admin).
+  APPMILLA also holds subject-scoped service users: `forge`, `fleet-memory`, `guardkit`, `jarvis` and
+  `dashboard_approve` (the factory dashboard's answers to Forge's cards: it may publish only on
+  `agents.approval.forge.*.response` and subscribe only to `_INBOX.>`). Nine passwords in all; see
+  `config/accounts/accounts.conf.template` and `.env.example`
 - **Ops scripts** — verification, health checks
 - **JetStream streams** — 6 core + project streams with idempotent provisioning
 - **KV buckets** — 4 buckets, created and kept in line with their definitions by `kv/provision-kv.sh`
@@ -210,8 +214,10 @@ A `.dockerignore` excludes `.git`, `docs/`, `tasks/`, `.claude/`, `.guardkit/`,
 ### How Password Injection Works
 
 1. `.env` passwords are loaded into the container via `env_file: .env`
-2. `docker-entrypoint.sh` validates all 4 required password variables
-3. `envsubst` processes `config/accounts/accounts.conf.template` → live config
+2. `docker-entrypoint.sh` validates the 4 core password variables up front
+3. `envsubst` processes `config/accounts/accounts.conf.template` → live config, substituting only the
+   nine named `*_NATS_PASSWORD` variables; a missing one leaves an empty password or an unresolved
+   `${VAR}`, and the entrypoint refuses to start
 4. NATS server starts with the processed configuration
 
 ## Health Check Verification

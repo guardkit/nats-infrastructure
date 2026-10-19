@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =======================================
-# rotate-nats-password.sh — per-account rotation of the eight NATS account
+# rotate-nats-password.sh — per-account rotation of the nine NATS account
 # passwords on the ships-computer broker, generalizing the rotate.sh gate
 # grammar to the founding secrets-register entry's tested recipe.
 #
@@ -20,7 +20,7 @@
 # THE DELIVERY MECHANISM (founding §5 + Wave 3 `c6820ed`):
 #   The broker entrypoint (scripts/docker-entrypoint.sh) re-renders
 #   config/accounts/accounts.conf from the environment via envsubst on EVERY
-#   container START, and the compose `nats` service now takes all eight
+#   container START, and the compose `nats` service now takes all nine
 #   passwords as interpolated `environment:` entries (`${VAR:?}`) fed by
 #   `sops exec-env` — a bare `up -d` fails loudly and ciphertext can never
 #   transit envsubst. Rotation delivery is therefore:
@@ -86,7 +86,7 @@
 #   rotate-nats-password.sh --account <NAME> [options]
 #
 #   Required:
-#     --account <ADMIN|RICH|JAMES|MARK|FORGE|FLEET_MEMORY|GUARDKIT|JARVIS>
+#     --account <ADMIN|RICH|JAMES|MARK|FORGE|FLEET_MEMORY|GUARDKIT|JARVIS|DASHBOARD_APPROVE>
 #   Source selection (DF-022 dual mode):
 #     --source <auto|sops|plaintext>   default auto — SOPS-PREFERRED: the
 #                                      encrypted authority wins whenever it
@@ -217,7 +217,8 @@ JARVIS|gb10|slack-jarvis/jarvis.enc.env|plain:JARVIS_NATS_PASSWORD|req|jarvis da
 FLEET_MEMORY|gb10|fleet-memory-pg/relay-env-deploy.enc.env|url:FLEET_MEMORY_NATS_URL|req|fleet-memory-relay (PAGE-nats 3.3 row 1 / PAGE-fleet-memory-pg 10.3): sops exec-env … 'docker compose up -d --force-recreate' from deploy/relay — the Created timestamp MUST change
 FLEET_MEMORY|gb10|fleet-memory-pg/fleet-memory-root.enc.env|url:FLEET_MEMORY_NATS_URL|req|fleet-memory root reader (PAGE-nats 3.3 row 2) — TWICE-STALE copy (PAGE-fleet-memory-pg 9): R4 on this file is mandatory, picked up at next process start
 FLEET_MEMORY|gb10|fleet-memory-pg/guardkit.enc.env|url:FLEET_MEMORY_NATS_URL|req|guardkit reader copy (PAGE-nats 3.3 row 3) — next guardkit process start
-GUARDKIT|gb10|fleet-memory-pg/guardkit.enc.env|plain:GUARDKIT_NATS_PASSWORD|opt|PAGE-nats 3.4 + 8 DISCOVERY: no on-disk consumer copy was found in the 07-11 sweep — if the key is absent this is a SKIP, and the invoking env of the harvest publisher is still the open cell"
+GUARDKIT|gb10|fleet-memory-pg/guardkit.enc.env|plain:GUARDKIT_NATS_PASSWORD|opt|PAGE-nats 3.4 + 8 DISCOVERY: no on-disk consumer copy was found in the 07-11 sweep — if the key is absent this is a SKIP, and the invoking env of the harvest publisher is still the open cell
+DASHBOARD_APPROVE|gb10|factory-dashboard/dashboard-approve.enc.env|plain:DASHBOARD_APPROVE_NATS_PASSWORD|opt|factory dashboard answers module (approvals design 2026-10-19). DELIVERY: the dashboard reads this password from a FILE whose path its own setting names; it is never on argv, in a container environment or in any printed line. Its compose takes the value from a sops exec-env child process as a compose secret, so the container sees /run/secrets/dashboard_approve_nats_password. Recreate the dashboard under sops exec-env with --force-recreate AFTER the broker recreate. 'opt' until the dashboard's own enc file exists — VERIFY the file and host at run time"
 
 # ---------------------------------------------------------------------------
 # Parse arguments (no secret ever arrives on argv)
@@ -339,9 +340,9 @@ fi
 PROBE_CAPTURE=""
 PROBE_CAPTURE_DETAIL=""
 case "${ACCOUNT}" in
-    # admin's user carries NO permissions block (accounts.conf.template:202-206)
+    # admin's user carries NO permissions block (accounts.conf.template:228-232)
     # and lives in SYS, which has no `jetstream:` line at all
-    # (accounts.conf.template:201-208) — no stream can exist in that account, and
+    # (accounts.conf.template:227-234) — no stream can exist in that account, and
     # no filter above matches admin.> in any case. UNCAPTURED, kept.
     ADMIN)         PROBE_USER="admin";        PROBE_SUBJECT="admin.sec.probe";          RF_STREAM="";         RF_DURABLE="" ;;
     # rich publishes ">" (accounts.conf.template:40) — free choice. `probe.rich`
@@ -349,13 +350,13 @@ case "${ACCOUNT}" in
     RICH)          PROBE_USER="rich";         PROBE_SUBJECT="probe.rich";               RF_STREAM="";         RF_DURABLE="" ;;
     # james publishes ">" (accounts.conf.template:48). Same reasoning as rich.
     JAMES)         PROBE_USER="james";        PROBE_SUBJECT="probe.james";              RF_STREAM="";         RF_DURABLE="" ;;
-    # mark's ONLY publish grant is finproxy.> (accounts.conf.template:189) and
+    # mark's ONLY publish grant is finproxy.> (accounts.conf.template:215) and
     # the FINPROXY stream filters exactly finproxy.> (stream-definitions.json:83)
     # — there is NO permitted subject outside a stream filter, so the subject
     # stays and the attribution note carries the cost instead.
     MARK)          PROBE_USER="mark";         PROBE_SUBJECT="finproxy.sec.probe";       RF_STREAM="";         RF_DURABLE=""
                    PROBE_CAPTURE="FINPROXY"
-                   PROBE_CAPTURE_DETAIL="mark may publish ONLY finproxy.> (accounts.conf.template:189), and the FINPROXY
+                   PROBE_CAPTURE_DETAIL="mark may publish ONLY finproxy.> (accounts.conf.template:215), and the FINPROXY
 stream filters exactly finproxy.> (stream-definitions.json:83) — this user has NO
 permitted subject outside a stream filter, so the probe cannot be moved.
 FINPROXY is work-retention (stream-definitions.json:84) with no consumer, so the
@@ -395,7 +396,21 @@ MEMORY keeps 365d (stream-definitions.json:73), so the message persists." ;;
     # pipeline.*-queued.> (…:5); $JS.>/$KV.> are API subjects. That leaves
     # _INBOX.> (accounts.conf.template:165) — permitted and uncaptured.
     JARVIS)        PROBE_USER="jarvis";       PROBE_SUBJECT="_INBOX.sec.probe";         RF_STREAM="";         RF_DURABLE="" ;;
-    *) die "--account must be one of ADMIN RICH JAMES MARK FORGE FLEET_MEMORY GUARDKIT JARVIS" ;;
+    # dashboard_approve's ONLY publish grant is agents.approval.forge.*.response
+    # (accounts.conf.template:196 — a publisher of card answers and nothing else),
+    # which AGENTS filters (stream-definitions.json:16). There is no permitted
+    # uncaptured subject: the subject stays and the attribution note carries the
+    # cost. The token 'sec-rotate-probe' is never a card's request token.
+    DASHBOARD_APPROVE) PROBE_USER="dashboard_approve"; PROBE_SUBJECT="agents.approval.forge.sec-rotate-probe.response"; RF_STREAM=""; RF_DURABLE=""
+                   PROBE_CAPTURE="AGENTS"
+                   PROBE_CAPTURE_DETAIL="dashboard_approve may publish ONLY agents.approval.forge.*.response
+(accounts.conf.template:196), which AGENTS filters (stream-definitions.json:16) —
+this user has NO permitted subject outside a stream filter, so the probe cannot be moved.
+Forge's merge executor holds a CORE subscription on agents.approval.forge.*.response
+and receives the probe: the payload is not a MessageEnvelope, so it logs one
+'Failed to parse NATS message as MessageEnvelope' error per probe and does nothing
+else. Expect that error; do not chase it. AGENTS keeps 24h (stream-definitions.json:18)." ;;
+    *) die "--account must be one of ADMIN RICH JAMES MARK FORGE FLEET_MEMORY GUARDKIT JARVIS DASHBOARD_APPROVE" ;;
 esac
 VAR_NAME="${ACCOUNT}_NATS_PASSWORD"
 

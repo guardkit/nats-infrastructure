@@ -171,6 +171,32 @@ accounts {
                     ]
                 }
             }
+            {
+                # factory dashboard answer identity (19 October 2026, design
+                # factory-dashboard docs/architecture/approvals-from-the-dashboard-2026-10-19.md):
+                # the dashboard's answers module posts a person's answer to one of
+                # Forge's cards (merge, build gate, spec review, sign-in question,
+                # mission plan) as an ApprovalResponsePayload envelope — the same
+                # message Jarvis sends — on the card's own response subject. Forge
+                # still decides: it checks the identity, keeps "first answer wins"
+                # and refuses stale answers.
+                #
+                # Least privilege: it may publish ONLY card answers, and may
+                # subscribe ONLY to its own reply inboxes. No $JS.> (it uses a plain
+                # core publish and flush, never JetStream), no $KV.>, no read of
+                # agents.> or anything else. A leaked credential can post an answer
+                # under an identity Forge would still refuse unless it is an
+                # approver's. The dashboard's read side never uses this user.
+                #   publishes: agents.approval.forge.*.response   (exactly one token
+                #              between forge and response: the card's request token)
+                #   replies:   _INBOX.>
+                user: "dashboard_approve"
+                password: "${DASHBOARD_APPROVE_NATS_PASSWORD}"
+                permissions: {
+                    publish:   [ "agents.approval.forge.*.response" ]
+                    subscribe: [ "_INBOX.>" ]
+                }
+            }
         ]
     }
 

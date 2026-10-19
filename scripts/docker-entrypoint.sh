@@ -30,6 +30,8 @@
 #     FLEET_MEMORY_NATS_PASSWORD  — fleet-memory relay service identity (APPMILLA)
 #     GUARDKIT_NATS_PASSWORD      — guardkit harvest publisher identity (APPMILLA)
 #     JARVIS_NATS_PASSWORD        — jarvis ship's-computer service identity (APPMILLA)
+#     DASHBOARD_APPROVE_NATS_PASSWORD — factory dashboard answer identity (APPMILLA);
+#                                   publishes card answers only (19 October 2026)
 #
 # Usage (Docker):
 #   ENTRYPOINT ["scripts/docker-entrypoint.sh"]
@@ -109,7 +111,7 @@ for template in "${TEMPLATE_DIR}"/*.conf.template; do
     # producing invalid subjects like `.API.>`. Naming the allowed vars leaves
     # every other `$`-token (NATS subjects) untouched, which is what lets
     # accounts use subject-scoped permissions including JetStream/KV subjects.
-    envsubst '${RICH_NATS_PASSWORD} ${JAMES_NATS_PASSWORD} ${MARK_NATS_PASSWORD} ${ADMIN_NATS_PASSWORD} ${FORGE_NATS_PASSWORD} ${FLEET_MEMORY_NATS_PASSWORD} ${GUARDKIT_NATS_PASSWORD} ${JARVIS_NATS_PASSWORD}' < "$template" > "$output"
+    envsubst '${RICH_NATS_PASSWORD} ${JAMES_NATS_PASSWORD} ${MARK_NATS_PASSWORD} ${ADMIN_NATS_PASSWORD} ${FORGE_NATS_PASSWORD} ${FLEET_MEMORY_NATS_PASSWORD} ${GUARDKIT_NATS_PASSWORD} ${JARVIS_NATS_PASSWORD} ${DASHBOARD_APPROVE_NATS_PASSWORD}' < "$template" > "$output"
     processed_any=1
     echo "Processed: ${template} -> ${output}"
 done
