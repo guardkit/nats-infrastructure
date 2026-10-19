@@ -14,6 +14,7 @@ Verifies all acceptance criteria for TASK-DCD-001:
 """
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -254,14 +255,19 @@ class TestConfigMountsReadOnly:
 
 
 class TestEnvFile:
-    """AC-010: env_file references .env."""
+    """AC-010, superseded by DF-022 (2026-07-30): no env_file. The passwords
+    reach compose from a ``sops exec-env`` child process and are interpolated
+    with ``:?`` in ``environment:``, so a bare ``up -d`` fails loudly and an
+    encrypted env_file can never feed ciphertext through envsubst."""
 
-    def test_env_file_references_dot_env(self, nats_service: dict) -> None:
-        env_file = nats_service.get("env_file", "")
-        if isinstance(env_file, list):
-            env_file_list = env_file
-        else:
-            env_file_list = [str(env_file)]
-        assert any(".env" in str(ef) for ef in env_file_list), (
-            f"env_file must reference .env, got: {env_file_list}"
+    def test_passwords_come_from_the_environment_not_an_env_file(
+        self, nats_service: dict
+    ) -> None:
+        assert "env_file" not in nats_service, "env_file is back (DF-022 retired it)"
+        environment = nats_service.get("environment", {})
+        template = (PROJECT_ROOT / "config" / "accounts" / "accounts.conf.template").read_text(
+            encoding="utf-8"
         )
+        for name in sorted(set(re.findall(r"\$\{(\w+_NATS_PASSWORD)\}", template))):
+            assert name in environment, f"{name} is not passed to the broker"
+            assert f"${{{name}:?" in str(environment[name]), f"{name} is not required (:?)"

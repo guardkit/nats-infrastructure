@@ -206,7 +206,7 @@ creation_rules:
 EOF
     umask 077
 
-    # Broker authority — all eight. FIDELITY: the REAL nats/broker.enc.env (and
+    # Broker authority — all nine. FIDELITY: the REAL nats/broker.enc.env (and
     # forge-nats / jarvis / specialist-agent) carry WHOLE-LINE `#` comments,
     # including ones containing `|` and `=`. The exec-env parser law bans INLINE
     # (trailing) comments on a value line — it does not ban comment lines — so
@@ -226,6 +226,8 @@ EOF
         printf 'GUARDKIT_NATS_PASSWORD=%s\n' "${OLD_GUARDKIT}"
         printf '# Account: JARVIS | User: jarvis | systemd --user consumer\n'
         printf 'JARVIS_NATS_PASSWORD=%s\n' "${OLD_JARVIS}"
+        printf '# Account: APPMILLA | User: dashboard_approve | factory dashboard answers (file)\n'
+        printf 'DASHBOARD_APPROVE_NATS_PASSWORD=%s\n' "$(gen)"
     } > "${root}/nats/broker.enc.env"
 
     # rich consumers (plain fields).
@@ -1073,7 +1075,7 @@ chk "${parser_bad}" "(15) the publish-grant parser is sound on all three grant s
 
 captured_accounts=""
 probe_bad=0
-for acct in ADMIN RICH JAMES MARK FORGE FLEET_MEMORY GUARDKIT JARVIS; do
+for acct in ADMIN RICH JAMES MARK FORGE FLEET_MEMORY GUARDKIT JARVIS DASHBOARD_APPROVE; do
     plog="${WORK}/dry-probe-${acct}.log"
     p_rc=0
     run_rotate "${plog}" "$(gen)" "$(gen)" --account "${acct}" || p_rc=$?
@@ -1100,7 +1102,7 @@ for acct in ADMIN RICH JAMES MARK FORGE FLEET_MEMORY GUARDKIT JARVIS; do
     mapfile -t GRANTS < <(user_publish_grants "${puser}")
     permitted=""
     if [ "${#GRANTS[@]}" -eq 0 ]; then
-        # accounts.conf.template:201-208 — admin's user carries NO permissions
+        # accounts.conf.template:231-238 — admin's user carries NO permissions
         # block at all, so NATS grants it every subject. That is the ONE
         # allow-all exception; any OTHER user parsing empty is a parse hole or a
         # user that may not publish at all, and must NOT be waved through.
@@ -1143,12 +1145,13 @@ for acct in ADMIN RICH JAMES MARK FORGE FLEET_MEMORY GUARDKIT JARVIS; do
 done
 chk "${probe_bad}" "(15) every account's probe subject obeys the PROBE-SUBJECT LAW" \
     "(15) ${probe_bad} probe-subject verdict(s) failed"
-# The ONLY accounts allowed to keep a captured subject are the two whose grants
-# contain no uncaptured subject at all: guardkit may publish only
-# memory.episode.>, mark only finproxy.>. A third name here means a curable
-# probe was left in a stream.
-same "${captured_accounts}" "MARK GUARDKIT " \
-    "(15) exactly MARK + GUARDKIT keep a captured subject (their grants allow nothing else)" \
+# The ONLY accounts allowed to keep a captured subject are the three whose
+# grants contain no uncaptured subject at all: guardkit may publish only
+# memory.episode.>, mark only finproxy.>, dashboard_approve only
+# agents.approval.forge.*.response (captured by AGENTS). A fourth name here
+# means a curable probe was left in a stream.
+same "${captured_accounts}" "MARK GUARDKIT DASHBOARD_APPROVE " \
+    "(15) exactly MARK + GUARDKIT + DASHBOARD_APPROVE keep a captured subject (their grants allow nothing else)" \
     "(15) the set of stream-captured probe accounts changed — a curable probe is landing in a stream"
 
 # ---------------------------------------------------------------------------

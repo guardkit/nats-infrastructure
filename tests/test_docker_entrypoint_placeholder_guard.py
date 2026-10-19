@@ -447,12 +447,14 @@ class TestVerifyScriptChecksPlaceholderRejection:
     def test_verify_script_probes_placeholder_credentials(
         self, verify_script_text: str
     ) -> None:
-        # Must invoke nats pub with --password "changeme"
+        # Must try the placeholder password. Credentials travel in the nats
+        # CLI's environment (NATS_PASSWORD=…), never on argv (--password …),
+        # since the 2026-07-30 secrets-hygiene pass.
         assert re.search(
-            r'--password\s+"changeme"',
+            r'NATS_PASSWORD="changeme"',
             verify_script_text,
         ), (
-            "verify-nats.sh must try authenticating with --password \"changeme\" "
+            "verify-nats.sh must try authenticating with NATS_PASSWORD=\"changeme\" "
             "to assert the placeholder is rejected"
         )
 
